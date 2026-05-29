@@ -4349,7 +4349,15 @@ function enterTestMode() {
       body: JSON.stringify(body)
     });
     if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + await res.text());
-    return res.json();
+    const data = await res.json();
+    // /api/diagnose 用心跳流式响应：连接长时不被代理超时关；
+    // 流一旦开始就无法改 HTTP status，运行期错误统一在 body 里以 {error:true,...} 返回
+    if (data && data.error === true) {
+      const e = new Error(data.detail || '诊断失败');
+      e.status = data.status;
+      throw e;
+    }
+    return data;
   }
 
   // 初始化输入框 & 保存/测试按钮
