@@ -1304,9 +1304,14 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--text
         <div style="font-size:12px;color:var(--sub);margin-bottom:8px">检测到多个活跃站点，请选择：</div>
         <div id="diagMarketList"></div>
       </div>
-      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:center;flex-wrap:wrap;gap:12px">
         <button class="diag-go-btn" id="diagGoBtn" onclick="startDiagnosis()">开始诊断</button>
-        <span id="diagStatus" style="margin-left:12px;font-size:12px;color:var(--sub)"></span>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);cursor:pointer"
+               title="积加广告/搜索词数据默认缓存 4 小时供多人共享。如果你刚修改过广告活动（暂停/启动/调价）想立刻看到效果，勾选此项绕过缓存重新拉取，会多耗时 30s-2min">
+          <input type="checkbox" id="diagForceRefresh" style="cursor:pointer">
+          🔄 强制刷新（绕过缓存拉最新）
+        </label>
+        <span id="diagStatus" style="font-size:12px;color:var(--sub)"></span>
       </div>
     </div>
 
@@ -4384,6 +4389,11 @@ function enterTestMode() {
   }
 
   async function startDiagnosis(){
+    // 防双击：诊断要跑 3-5 分钟 + 调一次后端 = 一份钱，快速点两下不能触发两次
+    const __btn = $('diagGoBtn');
+    if (__btn.dataset.busy === '1') return;
+    __btn.dataset.busy = '1';
+    try {
     const asins = getAsins();
     // 清除上一轮的红色高亮
     document.querySelectorAll('.diag-asin-input.invalid').forEach(el => el.classList.remove('invalid'));
@@ -4443,6 +4453,9 @@ function enterTestMode() {
     } finally {
       $('diagGoBtn').disabled = false;
     }
+    } finally {
+      __btn.dataset.busy = '';
+    }
   }
   window.startDiagnosis = startDiagnosis;
 
@@ -4474,39 +4487,46 @@ function enterTestMode() {
   }
 
   async function runDiagnose(asins, marketId){
-    // 真实节奏（来自后端日志实测）：
-    //   0-90s   拉积加多接口分页 + Sorftime → 进度 30→55
-    //   90-110s 计算+处理              → 进度 55→60
-    //   110-280s Claude AI 推理         → 进度 60→90
-    //   >280s    "AI 还在生成… 已用 Xs"，进度卡 90
-    setProgress(30, '拉取积加 + Sorftime 数据中…（首次较慢，多接口分页）');
+    // 真实节奏（来自后端日志实测，含并发限流场景）：
+    //   单人独占：       数据 60-120s + Claude 推理 2-3min ≈ 3-5min
+    //   2-3 人同店并发：  缓存命中后第二人秒返回数据，仍 3-5min
+    //   2-3 人异店并发：  数据排队 2-4min + Claude 2-3min ≈ 4-8min
+    //   高峰多店并发：    数据排队 5-10min+ → 总 8-15min
+    // 因此阶段窗口要宽：数据 0-180s，预处理 180-210s，AI 210-420s，>420s 仍可能在排队
+    setProgress(30, '拉取积加 + Sorftime 数据中…（首次较慢，多接口分页 + 限流排队）');
     const meta = document.getElementById('diagProgressMeta');
     const t0 = Date.now();
     const timer = setInterval(()=>{
       const elapsed = Math.floor((Date.now() - t0) / 1000);
       let pct, sub;
-      if (elapsed < 90){
-        pct = 30 + (elapsed / 90) * 25;          // 30 → 55
+      if (elapsed < 180){
+        // 数据拉取阶段：单人 60-120s 够，多人并发受积加 1秒/次 限流可能拖到 3min
+        pct = 30 + (elapsed / 180) * 25;          // 30 → 55
         sub = `拉取积加广告/搜索词/库存 + Sorftime 竞品数据…（${elapsed}s）`;
-      } else if (elapsed < 110){
-        pct = 55 + ((elapsed - 90) / 20) * 5;     // 55 → 60
+      } else if (elapsed < 210){
+        pct = 55 + ((elapsed - 180) / 30) * 5;     // 55 → 60
         sub = `本地预处理：成本/广告/搜索词分桶…（${elapsed}s）`;
-      } else if (elapsed < 280){
-        pct = 60 + ((elapsed - 110) / 170) * 30;  // 60 → 90
+      } else if (elapsed < 420){
+        pct = 60 + ((elapsed - 210) / 210) * 30;  // 60 → 90
         sub = `Claude AI 生成诊断报告中…（${elapsed}s，AI 推理通常 2-3 分钟）`;
       } else {
         pct = 90;
-        sub = `AI 还在生成中…已用 ${elapsed}s，请耐心等待`;
+        sub = `仍在处理中（${elapsed}s）— 可能是积加接口高并发排队或 AI 仍在生成，请耐心等待`;
       }
       setProgress(Math.min(pct, 90), sub);
-      if (meta) meta.textContent = `已用 ${elapsed}s / 通常 3-5 分钟`;
+      if (meta) meta.textContent = `已用 ${elapsed}s / 通常 3-8 分钟（积加限流 1秒/次，多人并发会更久）`;
     }, 1000);
+    const forceRefresh = !!($('diagForceRefresh') && $('diagForceRefresh').checked);
     try {
-      const data = await apiPost('/api/diagnose', { asins, marketId, days: 30 });
+      const data = await apiPost('/api/diagnose', {
+        asins, marketId, days: 30, force_refresh: forceRefresh,
+      });
       clearInterval(timer);
-      setProgress(100, `完成（共用时 ${Math.floor((Date.now()-t0)/1000)}s）`);
+      setProgress(100, `完成（共用时 ${Math.floor((Date.now()-t0)/1000)}s${forceRefresh ? ' · 已绕过缓存' : ''}）`);
       setTimeout(hideProgress, 600);
       renderReport(data);
+      // 强制刷新是一次性动作，诊断完成后自动取消勾选，避免下次默认还是慢路径
+      if (forceRefresh && $('diagForceRefresh')) $('diagForceRefresh').checked = false;
     } catch(e){
       clearInterval(timer);
       hideProgress();
