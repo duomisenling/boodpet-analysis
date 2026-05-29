@@ -5179,6 +5179,9 @@ function enterTestMode() {
         <details class="diag-sub" open>
           <summary>🚫 黑名单 TOP（${stBlack.length}）— 立即否定可月省 ${fmtMoney(stSum.blacklist_total_waste, cur)}</summary>
           <div class="diag-sub-body">
+            <div style="font-size:11px;color:var(--sub);margin-bottom:8px;padding:6px 10px;background:rgba(248,113,113,.06);border-left:2px solid #f87171;border-radius:3px;line-height:1.6">
+              判定规则：<strong>多日累计 点击 ≥ 3 且 订单 = 0</strong> · 按花费降序取 Top 20 · 已排除暂停活动里的词（已止血、无当前可执行动作）
+            </div>
             <div style="display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-bottom:6px">
               ${copyBtn(
                 Object.entries(stBlack.slice(0,20).reduce((acc, r) => {
@@ -5207,6 +5210,9 @@ function enterTestMode() {
         <details class="diag-sub" open>
           <summary>🏆 黄金词 TOP（${stWin.length}）— 应新建手动精准活动收割</summary>
           <div class="diag-sub-body">
+            <div style="font-size:11px;color:var(--sub);margin-bottom:8px;padding:6px 10px;background:rgba(110,231,183,.06);border-left:2px solid #6ee7b7;border-radius:3px;line-height:1.6">
+              判定规则：<strong>多日累计 订单 ≥ 2 且 ACOS &lt; 40%</strong> · 按订单数降序取 Top 20 · 暂停活动里的词<strong>保留</strong>（标 📌 历史验证，建议新建活动收割）
+            </div>
             <div style="display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-bottom:6px">
               ${copyBtn(
                 `=== 建议新建活动配置（按词组复制到广告后台手动精准活动）===\n\n` +
@@ -5241,6 +5247,9 @@ function enterTestMode() {
         <details class="diag-sub" open>
           <summary>🔥 重灾区 ACOS &gt; 100%（${stDis.length}）— 按建议动作止血</summary>
           <div class="diag-sub-body">
+            <div style="font-size:11px;color:var(--sub);margin-bottom:8px;padding:6px 10px;background:rgba(245,158,11,.06);border-left:2px solid #f59e0b;border-radius:3px;line-height:1.6">
+              判定规则：<strong>多日累计 订单 ≥ 1 且 ACOS &gt; 100%</strong>（卖一单亏本以上）· 按花费降序取 Top 10 · 已排除暂停活动
+            </div>
             <div style="font-size:11px;color:var(--sub);margin:4px 0 8px">动作分级：暂停（ACOS&gt;200% 且有量）/ 加否定（仅 1 单可能偶然）/ 降 bid 30%（其他）</div>
             ${stTable(stDis.slice(0,10), [
               {h:'搜索词', f:r=>esc(r.keyword)},
@@ -5261,6 +5270,10 @@ function enterTestMode() {
         <details class="diag-sub" open>
           <summary>🎯 竞品 ASIN 截流（${stCompAsin.length}）</summary>
           <div class="diag-sub-body">
+            <div style="font-size:11px;color:var(--sub);margin-bottom:8px;padding:6px 10px;background:rgba(252,211,77,.06);border-left:2px solid #fcd34d;border-radius:3px;line-height:1.6">
+              判定规则：用户搜索词本身就是 <strong>ASIN（B0 开头 10 位）</strong>——说明买家在用竞品 ASIN 找替代品并点到了我们 · 已排除暂停活动<br>
+              建议判定：<strong>点击 ≥ 3 且 0 订单 → 否定</strong>（截不到流，纯烧钱）；其余 <strong>保留</strong>（有真实截流转化）
+            </div>
             ${(() => {
               const negAsins = stCompAsin.filter(r => r.verdict === 'negative');
               const headerBtn = negAsins.length
