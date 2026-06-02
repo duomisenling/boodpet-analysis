@@ -790,9 +790,35 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--text
 .vol-bar-bg{height:5px;border-radius:3px;background:var(--surface3);width:100px;overflow:hidden}
 .vol-bar{height:100%;border-radius:3px;background:var(--accent)}
 .kw-tag{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600}
-.kw-core{background:rgba(47,129,247,.15);color:#58a6ff}
-.kw-long{background:rgba(227,179,65,.15);color:#e3b341}
-.kw-trend{background:rgba(63,185,80,.15);color:#3fb950}
+.kw-core{background:rgba(47,129,247,.15);color:#58a6ff}    /* 大词 / 核心词 */
+.kw-phrase{background:rgba(252,211,77,.15);color:#fcd34d}  /* 短语词（2-gram）*/
+.kw-long{background:rgba(227,179,65,.15);color:#e3b341}    /* 长尾词 */
+.kw-trend{background:rgba(63,185,80,.15);color:#3fb950}    /* 趋势词 */
+
+/* 可折叠段（竞品关键词反查 / 反推真实行业大词）：清晰的 ▾/▸ 切换图标 */
+details.diag-collapsible > summary {
+  list-style: none;
+  outline: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin: -2px -6px 8px;
+  transition: background 0.15s;
+}
+details.diag-collapsible > summary::-webkit-details-marker { display: none; }
+details.diag-collapsible > summary::marker { display: none; content: ''; }
+details.diag-collapsible > summary:hover { background: rgba(165, 180, 252, 0.10); }
+details.diag-collapsible .collapse-arrow {
+  display: inline-block;
+  font-size: 14px;
+  font-weight: 700;
+  color: #a5b4fc;
+  margin-right: 6px;
+  transition: transform 0.18s ease;
+  user-select: none;
+}
+details.diag-collapsible:not([open]) .collapse-arrow {
+  transform: rotate(-90deg);
+}
 
 /* ===== PAIN POINTS ===== */
 .pain-list{display:flex;flex-direction:column;gap:8px}
@@ -2748,7 +2774,7 @@ function renderListing(d) {
             <span class="algo-tag algo-rufus">Rufus 问答推荐</span>
           </div>
           <div style="margin-top:8px;font-size:11px;color:var(--sub);line-height:1.7">
-            <b style="color:var(--text)">A9：</b>核心关键词前置，覆盖高搜索量词，提升自然排名权重<br>
+            <b style="color:var(--text)">A9：</b>大词前置，覆盖高搜索量词，提升自然排名权重<br>
             <b style="color:var(--text)">Cosmo：</b>完整语义表达（材质+场景+人群），帮助系统理解商品用途，提升推荐准确度<br>
             <b style="color:var(--text)">Rufus：</b>加入使用场景短语（如"suitable for..."），适配自然语言问答推荐入口
           </div>
@@ -3522,7 +3548,13 @@ function renderResults(d) {
   const maxVol = Math.max(...keywords.map(k=>k.search_volume||0),1);
   const kwRows = keywords.slice(0,12).map(k => {
     const w = Math.max(4, ((k.search_volume||0)/maxVol)*90);
-    const typeMap = {'核心词':'kw-core','长尾词':'kw-long','趋势词':'kw-trend'};
+    // 兼容新旧术语：核心词=大词（运营口语化）；短语词 是新增 2-gram 档；长尾词 / 趋势词不变
+    const typeMap = {
+      '大词':'kw-core', '核心词':'kw-core',
+      '短语词':'kw-phrase', '组合词':'kw-phrase',
+      '长尾词':'kw-long',
+      '趋势词':'kw-trend',
+    };
     return `<tr>
       <td style="font-weight:600;color:var(--text)">${escHtml(k.keyword||'')}</td>
       <td><div class="vol-bar-bg"><div class="vol-bar" style="width:${w}px"></div></div></td>
@@ -3751,7 +3783,7 @@ function renderResults(d) {
   <!-- TAB: KEYWORDS -->
   <div class="tab-pane" id="tab-keywords">
     <div class="card" style="overflow-x:auto">
-      <div class="card-title"><span class="icon">🔑</span>核心关键词 <span style="font-size:11px;color:var(--muted);font-weight:400">(共${keywords.length}个)</span></div>
+      <div class="card-title"><span class="icon">🔑</span>关键词清单 <span style="font-size:11px;color:var(--muted);font-weight:400">(共${keywords.length}个 · 大词/短语词/长尾词/趋势词)</span></div>
       <table class="kw-table">
         <thead><tr><th>关键词</th><th style="min-width:110px">搜索量</th><th>月搜</th><th>CPC</th><th>类型</th><th>排名</th></tr></thead>
         <tbody>${kwRows||'<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">暂无关键词数据</td></tr>'}</tbody>
@@ -4006,226 +4038,6 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && document.getElementById('rewriteModal').style.display === 'flex') closeRewriteModal();
 });
 
-// ===== 测试模式：URL 带 ?test=1 启用，跳过竞品分析直接进生图面板 =====
-(function initTestMode() {
-  if (!new URLSearchParams(location.search).has('test')) return;
-  const btn = document.createElement('button');
-  btn.id = 'testModeBtn';
-  btn.className = 'btn btn-green btn-sm';
-  btn.textContent = '🧪 测试模式 · 跳过分析进入生图';
-  btn.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.3);font-size:12px';
-  btn.onclick = enterTestMode;
-  document.body.appendChild(btn);
-})();
-
-function enterTestMode() {
-  // 注入最小可用的 mock currentData，让 openImagePanel 不再报错
-  currentData = {
-    asin: 'TESTASIN001',
-    marketplace: 'US',
-    product_name: '测试产品 - 智能宠物饮水机',
-    category_rank: 'Pet Supplies > Cats > Bowls & Feeders',
-    keywords: ['pet water fountain', 'cat drinking fountain', 'automatic dispenser'],
-    pain_points: [
-      { issue: '宠物饮水量不足导致泌尿系统问题' },
-      { issue: '普通水碗细菌滋生' },
-      { issue: '主人不在家时无法及时换水' }
-    ],
-    user_portrait: {
-      gender: '不限',
-      age: '25-45',
-      occupation: '上班族',
-      lifestyle: '养宠物的城市白领',
-      purchase_motivation: '关注宠物健康，追求科技感与便捷生活'
-    },
-    price: 49.99,
-    _listing_title: 'TEST: Smart Pet Water Fountain 2.5L Auto Refill BPA Free'
-  };
-  // 同步填充生图面板里的"我们产品名称"和"卖点"输入框
-  const op = document.getElementById('ourProductName');
-  if (op && !op.value) op.value = '智能宠物饮水机 2.5L 自动循环过滤';
-  const ai = document.getElementById('advantageInput');
-  if (ai && !ai.value) ai.value = '超静音水泵；三重过滤；2.5L 大容量；缺水提醒；BPA-free 食品级材质';
-  // 不走 openImagePanel 的 currentData 校验，直接显示面板
-  document.getElementById('imagePanel').classList.add('visible');
-  const notice = document.getElementById('imageProductReuseNotice');
-  if (notice) notice.style.display = 'none';
-  alert('已进入测试模式 ✅\n\n下一步：\n1. 在面板里上传至少 1 张产品图片（可选：再传几张配件图）\n2. 选择生图模型（默认 Gemini）\n3. 点击 🚀 开始生成图片\n\nMock currentData 已注入，可在 F12 Console 输入 `currentData` 查看。');
-}
-
-// ===== MOCK 模式：URL 带 ?mock=1 → 拦截所有 n8n 请求返回假数据 =====
-// 用法：访问 http://127.0.0.1:8080/index.html?mock=1
-// 自动跳过登录 + 所有后端调用 1-3 秒内返回假数据，方便纯前端测试 UI
-(function _bpInitMockMode() {
-  if (!new URLSearchParams(location.search).has('mock')) return;
-
-  // 自动登录（跳过密码门）
-  try {
-    const fakeToken = 'mock-token-for-ui-testing';
-    localStorage.setItem('bp_auth', '1');
-    localStorage.setItem('bp_token', fakeToken);
-  } catch(e) {}
-
-  // 顶部 banner 提示用户在 mock 模式
-  document.addEventListener('DOMContentLoaded', () => {
-    const banner = document.createElement('div');
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:11500;padding:6px 16px;background:linear-gradient(90deg,#f78166,#e3b341);color:#0f172a;font-size:12px;font-weight:700;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.3)';
-    banner.innerHTML = '🧪 MOCK 模式 · 所有请求返回假数据，不调用真实后端 · <a href="?" style="color:#0f172a;text-decoration:underline">退出 mock</a>';
-    document.body.appendChild(banner);
-    document.querySelector('header.header').style.marginTop = '28px';
-  });
-
-  // 生成不同颜色的 SVG 占位图（每张图用不同颜色，方便区分）
-  const mockImg = (label, idx) => {
-    const colors = ['#a371f7','#3fb950','#2f81f7','#f78166','#e3b341','#39d353','#f85149'];
-    const color = colors[(idx-1) % colors.length];
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
-      <rect width="800" height="800" fill="${color}"/>
-      <text x="400" y="380" font-size="56" font-weight="800" fill="white" text-anchor="middle" font-family="sans-serif">MOCK</text>
-      <text x="400" y="440" font-size="28" fill="white" text-anchor="middle" opacity="0.9" font-family="sans-serif">${label}</text>
-      <text x="400" y="500" font-size="20" fill="white" text-anchor="middle" opacity="0.7" font-family="sans-serif">#${idx}</text>
-    </svg>`;
-    return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
-  };
-
-  const mockAnalysis = () => ({
-    status: 'success',
-    asin: 'B0MOCK0001',
-    product_name: 'Mock Cabinet Handles (假数据测试样本)',
-    marketplace: 'US',
-    currency: '$',
-    category_rank: 'Home & Kitchen > Hardware > Cabinet Handles',
-    price: 29.99,
-    monthly_sales: 487,
-    monthly_revenue: 14595,
-    rating: 4.5,
-    ratings_count: 234,
-    bsr: 1234,
-    fba_fee: 4.5,
-    scores: { market_size: 7, entry_barrier: 5, competition: 6, profit_potential: 7.5, overall: 6.6 },
-    seasonality: Array.from({length:12},(_,i)=>({month:(i+1)+'月',level:4+Math.floor(Math.random()*5)})),
-    keywords: [
-      { keyword: 'cabinet handles', search_volume: 50000 },
-      { keyword: 'modern cabinet pulls', search_volume: 12000 },
-      { keyword: 'black cabinet hardware', search_volume: 8000 },
-      { keyword: 'matte black drawer pulls', search_volume: 5500 }
-    ],
-    pain_points: [
-      { severity: 'high', issue: '安装尺寸难找，多种孔距规格不统一', opportunity: '附赠通用安装尺' },
-      { severity: 'med', issue: '颜色批次不一致，配色对不上' },
-      { severity: 'low', issue: '螺丝偶尔过短' }
-    ],
-    competitors: [
-      { name: 'BrandA', price: 24.99, rating: 4.3, monthly_sales: 800 },
-      { name: 'BrandB', price: 32.99, rating: 4.6, monthly_sales: 320 }
-    ],
-    user_portrait: { gender:'不限', age:'30-50', occupation:'房屋装修者', lifestyle:'追求质感家居', purchase_motivation:'提升家居美观与质感' },
-    risks: [{ type: '合规', detail: '注意尺寸标注准确性' }],
-    recommendation: '推荐进入'
-  });
-
-  const mockListing = (body) => {
-    const brand = body.brand_name || 'BrandX';
-    const isRevise = body.revision_mode === 'partial' || body.revision_mode === 'full';
-    const prev = body.previous_result || {};
-    // 修改模式：基于 previous_result，只在被标记 revise 的字段加 "[已修改]" 后缀
-    const fb = body.revision_feedback || {};
-    const tag = body.revision_mode === 'full' ? '[全部重写] ' : '[已修改] ';
-    const titleNew = `${brand} Modern Cabinet Handles 5-Inch Center Matte Black Drawer Pulls Set of 10 Heavy Duty Stainless Steel Kitchen Cabinet Hardware Furniture Pulls for Bathroom Closet Door Dresser Knobs`;
-    const bulletDefaults = [
-      `PREMIUM MATTE BLACK FINISH - These cabinet handles feature a premium matte black powder-coated finish that resists fingerprints, smudges, and scratches. The smooth surface adds a modern aesthetic to any kitchen, bathroom, or office. Made from solid stainless steel for long-lasting durability and timeless style.`,
-      `PERFECT 5-INCH CENTER FIT - Designed with precise 5-inch (127mm) hole center spacing for standard cabinet drawers. Compatible with most modern kitchen cabinets, bathroom vanities, and bedroom dressers. Easy upgrade without modifying existing mounting holes.`,
-      `EASY INSTALLATION IN MINUTES - Includes machine screws in two lengths (1 inch and 1.5 inch) to fit various drawer thicknesses. Mounting hardware kit comes pre-sorted in labeled bags. Step-by-step instructions guide you through installation.`,
-      `VERSATILE APPLICATIONS - Use throughout your home: kitchen cabinets, bathroom vanities, bedroom dressers, office desks, closet doors, garage cabinets, mudroom storage. The neutral matte black blends with modern, farmhouse, industrial, and minimalist decor styles.`,
-      `COMPLETE PACKAGE CONTENTS - Includes 10 cabinet handles, 20 mounting screws (10 of each length), assembly instructions in protective packaging preventing scratches. Holds approximately 8-10 pairs of flat shoes or trainers with display space above.`
-    ];
-    const result = {
-      title: isRevise && fb.title?.revise ? tag + titleNew : (isRevise ? (prev.title || titleNew) : titleNew),
-      bullet_points: bulletDefaults.map((b, i) => {
-        const k = 'bullet_' + (i + 1);
-        if (isRevise) {
-          if (fb[k]?.revise) return tag + b + ' [按反馈调整：' + (fb[k].note || '...') + ']';
-          return (prev.bullet_points && prev.bullet_points[i]) || b;
-        }
-        return b;
-      }),
-      description: '<b>Transform Your Space Today</b><br>Looking for cabinet handles that combine modern style with rock-solid durability?<br><br><b>Premium Construction</b><br>Made from solid stainless steel with matte black powder coating, these handles resist scratches, smudges, and corrosion. The 5-inch center mount fits standard modern cabinets without any modification needed.<br><br><b>Versatile & Easy</b><br>Whether you are upgrading your kitchen, bathroom, or office, these handles work with virtually any cabinet style. Installation takes just 5 minutes per handle with the included hardware.<br><br><b>Package Contents</b><ul><li>10 × Matte Black Cabinet Handles</li><li>20 × Machine Screws (10 × 1", 10 × 1.5")</li><li>Installation Instructions</li><li>Protective Packaging</li></ul>',
-      search_terms: 'matte black handles cabinet drawer pulls hardware kitchen modern furniture bathroom vanity dresser knobs',
-      subject_matter: ['Cabinet Handle','Drawer Pull','Matte Black','Kitchen Hardware','Modern Pull'],
-      reasons: {
-        title: '标题以核心关键词 cabinet handles 起头，命中亚马逊 A9 搜索权重；中段嵌入 5-Inch / Matte Black 等长尾词；结尾追加场景关键词（Kitchen / Bathroom / Closet）',
-        bullets: 'B1 突出材质与视觉质感；B2 强调尺寸适配（命中安装难找的痛点）；B3 安装便捷；B4 多场景应用扩大受众；B5 包装清单建立信任',
-        search_terms: '补充同义词（pulls / knobs）+ 风格词（modern, farmhouse）+ 应用场景词（vanity, dresser）共 12 个长尾词，不重复标题词',
-        description: '采用问题钩子开头吸引点击；中段拆 3 个卖点段落 + HTML 列表呈现包装清单；尾部隐含 CTA'
-      },
-      keywords_used: ['cabinet handles','drawer pulls','kitchen hardware','matte black','modern pull','bathroom vanity','dresser knob','5 inch center']
-    };
-    return result;
-  };
-
-  const mockPlan = () => ({
-    success: true,
-    totalImages: 7,
-    plan: [
-      { id: 1, name: '主白底图', type: 'main', prompt: 'PRODUCT INTEGRITY: ... pure white background, product centered, sharp focus.' },
-      { id: 2, name: '尺寸规格图', type: 'main', prompt: 'PRODUCT INTEGRITY: ... dimension labels overlaid, technical diagram style.' },
-      { id: 3, name: '材质特写', type: 'main', prompt: 'PRODUCT INTEGRITY: ... macro close-up showing material texture.' },
-      { id: 4, name: '使用场景图', type: 'main', prompt: 'PRODUCT INTEGRITY: ... product installed in modern kitchen, lifestyle.' },
-      { id: 5, name: '安装演示图', type: 'main', prompt: 'PRODUCT INTEGRITY: ... hand installing the product with included tools.' },
-      { id: 6, name: '对比优势图', type: 'main', prompt: 'PRODUCT INTEGRITY: ... side-by-side comparison vs cheap alternative.' },
-      { id: 7, name: '包装展示图', type: 'main', prompt: 'PRODUCT INTEGRITY: ... package contents laid out flat lay style.' }
-    ]
-  });
-
-  const mockGenerate = (body) => ({
-    taskId: body.taskId,
-    taskName: body.taskName || '图' + body.taskId,
-    prompt: body.prompt,
-    modelUsed: body.model === 'gpt' ? 'gpt-image-2' : 'gemini',
-    success: true,
-    imageBase64: mockImg(body.taskName || '图' + body.taskId, body.taskId || 1),
-    error: null
-  });
-
-  const makeResponse = (data, delay) => new Promise(resolve => {
-    setTimeout(() => {
-      resolve(new Response(JSON.stringify(data), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' }
-      }));
-    }, delay);
-  });
-
-  // 拦截所有 n8n fetch
-  const origFetch = window.fetch.bind(window);
-  window.fetch = function(input, init) {
-    const url = (typeof input === 'string') ? input : (input && input.url) || '';
-    if (url.indexOf('mai-n8n.zeabur.app') === -1) return origFetch(input, init);
-
-    let body = {};
-    try { body = init && init.body ? JSON.parse(init.body) : {}; } catch(e) {}
-
-    if (url.indexOf('product-analysis-report') !== -1) {
-      return makeResponse({ full_report: '## 这是 mock 模式生成的假报告\n\n包含市场分析、用户画像、关键词策略等完整内容...\n\n（实际后端会输出 2-4 千字的 Claude 深度分析）' }, 2000);
-    }
-    if (url.indexOf('product-analysis') !== -1) {
-      return makeResponse(mockAnalysis(), 2500);
-    }
-    if (url.indexOf('generate-listing-v2') !== -1) {
-      return makeResponse(mockListing(body), 3000);
-    }
-    if (url.indexOf('ai-image-gen') !== -1) {
-      if (body.action === 'plan') return makeResponse(mockPlan(), 2000);
-      if (body.action === 'generate') return makeResponse(mockGenerate(body), 2500 + Math.random() * 1500);
-    }
-    if (url.indexOf('competitor-ref-image') !== -1) {
-      return makeResponse({ imageBase64: mockImg('Competitor Ref', 99) }, 1500);
-    }
-    // 其他未知 n8n URL → 直接成功响应
-    return makeResponse({ success: true, mock: true }, 800);
-  };
-  console.log('🧪 [MOCK MODE] 已启用 - 所有 n8n 请求返回假数据');
-})();
 </script>
 
 <!-- ===== 产品诊断模块（独立后端：FastAPI on Zeabur） ===== -->
@@ -4591,6 +4403,9 @@ function enterTestMode() {
     </div>`;
   }
 
+  // 暴露给 dev 调试用：console 可直接 window.__diagRender(mockResp) 喂数据
+  window.__diagRender = renderReport;
+
   function renderReport(resp){
     const ai = resp.ai || {};
     const data = resp.data || {};
@@ -4651,6 +4466,29 @@ function enterTestMode() {
     const cur = (sel.salePriceAmount && sel.salePriceAmount.currencySymbol) || '$';
 
     // 1. 产品基础
+    // 「类目」列：从每行 sellersRankList 抽叶子节点（亚马逊页面权威）
+    // 父级 ASIN 通常各变体共享同一类目；找不到时退到 data.erp_bsr（主 ASIN 解析结果）
+    const _parseLeafBsr = (rankList) => {
+      if (!Array.isArray(rankList) || !rankList.length) return null;
+      const re = /\/(\d{6,})(?:\/|$|\?)/;
+      // 找最后一条带数字 nodeId 的（叶子最具体）
+      for (let i = rankList.length - 1; i >= 0; i--) {
+        const e = rankList[i];
+        if (Array.isArray(e) && e.length >= 2) {
+          const m = String(e[2] || '').match(re);
+          if (m) return {
+            rank: parseInt(e[0]) || null, name: e[1] || '', node_id: m[1],
+          };
+        }
+      }
+      const last = rankList[rankList.length - 1];
+      if (Array.isArray(last) && last.length >= 2) {
+        return { rank: parseInt(last[0]) || null, name: last[1] || '', node_id: null };
+      }
+      return null;
+    };
+    const _mainBsr = (data.erp_bsr && data.erp_bsr.leaf) || null;  // fallback
+
     const baseHtml = `
       <table class="diag-table">
         <tr><th>负责人</th><td>${esc(sel.sellingManagerName)}</td>
@@ -4659,16 +4497,25 @@ function enterTestMode() {
             <th>星级 / 评论</th><td>${esc(sel.averageStar || sel.star || '—')} ⭐ / ${esc(sel.ratingQuantity || sel.reviewQuantity || 0)} 条</td></tr>
       </table>
       <table class="diag-table">
-        <thead><tr><th>ASIN</th><th>SKU</th><th>售价</th><th>30天销量</th><th>FBA库存</th><th>排名</th></tr></thead>
+        <thead><tr><th>ASIN</th><th>SKU</th><th>售价</th><th>30天销量</th><th>FBA库存</th><th>类目</th><th title="亚马逊 BestSellersRank（积加 sellersRankList 叶子节点排名）">类目排名 ⓘ</th></tr></thead>
         <tbody>${(data.selling||[]).map(s => {
           const st = (stats.find(x => x.asin === s.asin) || {});
+          const leaf = _parseLeafBsr(s.sellersRankList) || _mainBsr;
+          const catCell = leaf
+            ? `<span title="${esc(leaf.name||'')}${leaf.node_id ? ' · node '+leaf.node_id : ''}" style="cursor:help">${esc(leaf.name||'—')}</span>`
+            : '<span style="color:var(--muted)">—</span>';
+          // 类目排名优先用 sellersRankList 叶子的 rank（与 catCell 同源），退化到 listing_stats.sellerRank
+          const rankCell = (leaf && leaf.rank != null)
+            ? `#${leaf.rank}`
+            : esc(st.sellerRank || '—');
           return `<tr>
             <td><code>${esc(s.asin)}</code></td>
             <td>${esc(st.sku || s.sellerSku || '—')}</td>
             <td>${fmtMoney((s.salePriceAmount||{}).currencyAmount, cur)}</td>
             <td>${esc(st.unitsOrdered ?? s.thirtyPs ?? '—')}</td>
             <td>${esc(s.fbaQuantity ?? '—')}</td>
-            <td>${esc(st.sellerRank || '—')}</td>
+            <td style="font-size:11px;max-width:180px">${catCell}</td>
+            <td>${rankCell}</td>
           </tr>`;
         }).join('')}</tbody>
       </table>`;
@@ -4727,11 +4574,48 @@ function enterTestMode() {
       ${hasFreightWarning ? `<div style="margin-top:8px;padding:8px 12px;background:rgba(251,191,36,.12);border-left:3px solid #fbbf24;border-radius:4px;font-size:12px;color:var(--sub);line-height:1.6">
         <strong style="color:#fbbf24">⚠ 头程数据缺失</strong>：表中带 ⚠ 的 SKU 在积加 FBA 进销存里没有数据（产品未关联 ASIN-SKU 或采购单未结算），<strong>单件成本只算了采购换算价、漏了头程</strong>，毛利和保本 ACOS 都是偏乐观的虚高值。建议运营到【积加 → 产品资料】里关联或建立该 SKU 的采购单，下次诊断即准。
       </div>` : ''}
-      ${ai.is_losing_money !== undefined ? `
+      ${ai.is_losing_money !== undefined ? (() => {
+        const _mc = cost[0] || {};
+        const _ms = stats[0] || {};
+        const _days = (data.window && data.window.effective_days) || 30;
+        const _units = +_ms.unitsOrdered || +_ms.thirtyPs || 0;
+        const _adsSpend = (_mc.ads_summary && +_mc.ads_summary.spend) || 0;
+        const _refund = (_mc.refund_amount != null ? +_mc.refund_amount : null);
+        const _grossProfit = _units * (+_mc.margin || 0);
+        const _netProfit = _grossProfit - _adsSpend - (_refund || 0);
+        const _money = v => (v == null || v === '' || isNaN(+v)) ? '—' : (cur + (+v).toFixed(2));
+        const _signed = v => (v == null || isNaN(+v)) ? '—' : ((+v >= 0 ? '+' : '') + cur + (+v).toFixed(2));
+        const _profitColor = (+_netProfit) >= 0 ? '#6ee7b7' : '#fca5a5';
+        const _marginColor = (+_mc.margin || 0) >= 0 ? '#6ee7b7' : '#fca5a5';
+        return `
         <div style="margin-top:10px">
           <span class="diag-badge ${ai.is_losing_money ? 'close' : 'good'}">${ai.is_losing_money ? '✗ 当前亏损' : '✓ 盈利'}</span>
+          <details style="display:inline-block;margin-left:10px;vertical-align:middle">
+            <summary style="cursor:pointer;font-size:11px;color:var(--sub);user-select:none">📐 判定依据（本产品近 ${_days} 天真实数据）</summary>
+            <div style="margin-top:8px;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);line-height:1.7;max-width:680px">
+              <table style="width:100%;border-collapse:collapse;font-size:12px">
+                <tr style="border-bottom:1px dashed var(--border)"><td style="padding:4px 8px;color:var(--sub);width:55%">主 ASIN</td><td style="text-align:right;padding:4px 8px;font-family:'JetBrains Mono',monospace">${esc(_mc.asin || '—')}</td></tr>
+                <tr><td style="padding:4px 8px;color:var(--sub)">售价</td><td style="text-align:right;padding:4px 8px;font-family:'JetBrains Mono',monospace">${_money(_mc.sale_price)}</td></tr>
+                <tr><td style="padding:4px 8px;color:var(--sub)">− FBA 配送费</td><td style="text-align:right;padding:4px 8px;font-family:'JetBrains Mono',monospace">${_money(_mc.fba_fee)}</td></tr>
+                <tr><td style="padding:4px 8px;color:var(--sub)">− 平台佣金</td><td style="text-align:right;padding:4px 8px;font-family:'JetBrains Mono',monospace">${_money(_mc.commission)}</td></tr>
+                <tr style="border-bottom:1px dashed var(--border)"><td style="padding:4px 8px;color:var(--sub)">− 单件成本（采购 ${_money(_mc.purchase_cost_local)} + 头程 ${_money(_mc.freight_local)}${_mc.freight_data_warning ? ' <span style=\\"color:#fbbf24\\" title=\\"头程数据缺失\\">⚠</span>' : ''}）</td><td style="text-align:right;padding:4px 8px;font-family:'JetBrains Mono',monospace">${_money(_mc.landed_cost)}</td></tr>
+                <tr style="background:rgba(110,231,183,.06)"><td style="padding:6px 8px;font-weight:600">＝ 单件毛利</td><td style="text-align:right;padding:6px 8px;font-family:'JetBrains Mono',monospace;font-weight:600;color:${_marginColor}">${_money(_mc.margin)} (${(+_mc.margin_rate||0).toFixed(1)}%)</td></tr>
+                <tr><td style="padding:4px 8px;color:var(--sub)">× ${_days} 天销量</td><td style="text-align:right;padding:4px 8px;font-family:'JetBrains Mono',monospace">${_units} 件</td></tr>
+                <tr style="border-bottom:1px dashed var(--border)"><td style="padding:4px 8px;color:var(--sub)">＝ 毛利总额</td><td style="text-align:right;padding:4px 8px;font-family:'JetBrains Mono',monospace">${_money(_grossProfit)}</td></tr>
+                <tr><td style="padding:4px 8px;color:var(--sub)">− 广告花费${_adsSpend === 0 ? ' <span style=\\"color:var(--muted)\\">(0，可能未拉到)</span>' : ''}</td><td style="text-align:right;padding:4px 8px;font-family:'JetBrains Mono',monospace">${_money(_adsSpend)}</td></tr>
+                <tr style="border-bottom:1px dashed var(--border)"><td style="padding:4px 8px;color:var(--sub)">− 退款${_refund == null ? ' <span style=\\"color:var(--muted)\\">(未拉到)</span>' : ''}</td><td style="text-align:right;padding:4px 8px;font-family:'JetBrains Mono',monospace">${_refund == null ? '—' : _money(_refund)}</td></tr>
+                <tr style="background:rgba(${(+_netProfit)>=0?'110,231,183':'248,113,113'},.10)"><td style="padding:8px;font-weight:700">＝ ${_days} 天净利估算</td><td style="text-align:right;padding:8px;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:13px;color:${_profitColor}">${_signed(_netProfit)}</td></tr>
+              </table>
+              <div style="margin-top:8px;font-size:11px;color:var(--muted);line-height:1.6">
+                ${_mc.freight_data_warning ? '⚠ 该 ASIN 头程数据缺失，毛利偏乐观<br>' : ''}
+                ${_refund == null ? '退款金额未拉到，未计入<br>' : ''}
+                数据源：售价/FBA/佣金 ← 积加 selling、单件成本 ← 积加 FBA 进销存 PSI、销量 ← 积加近 ${_days} 天聚合
+              </div>
+            </div>
+          </details>
           ${(ai.loss_root_cause||[]).map(r => `<div style="font-size:12px;margin-top:6px;color:var(--sub)">• ${esc(r)}</div>`).join('')}
-        </div>` : ''}
+        </div>`;
+      })() : ''}
       ${cost.length > 1 ? `
       <div style="margin-top:16px;font-size:12px;font-weight:600;color:var(--sub);margin-bottom:6px">变体综合对比</div>
       <table class="diag-table" style="overflow-x:auto">
@@ -5179,7 +5063,7 @@ function enterTestMode() {
         <summary>📊 运行中广告活动（${activeCamps.length} 个）</summary>
         <div class="diag-sub-body">
           <table class="diag-table">
-            <thead><tr><th>活动</th><th>类型</th><th>花费</th><th>订单</th><th>ACOS</th><th>评价 & 依据</th></tr></thead>
+            <thead><tr><th>活动</th><th>类型</th><th>花费</th><th>订单</th><th>ACOS</th><th>状态</th><th>建议 & 原因</th></tr></thead>
             <tbody>${activeCamps.map(c => {
               const tt = c.targetingType;
               const isManual = tt === 1 || tt === '1' || String(tt).toLowerCase() === 'manual';
@@ -5187,18 +5071,20 @@ function enterTestMode() {
               const ttypeLabel = isManual?'<span class="diag-badge" style="background:rgba(99,102,241,.15);color:#a5b4fc">手动</span>'
                                 :isAuto?'<span class="diag-badge" style="background:rgba(245,158,11,.15);color:#fcd34d">自动</span>'
                                 :'<span style="color:var(--sub);font-size:11px">—</span>';
-              const vClass = c._verdict==='保留'?'good':(c._verdict==='关闭'||c._verdict==='暂停')?'close':'warn';
+              const _vd = c._verdict || '';
+              const vClass = /保留/.test(_vd) ? 'good' : (/关闭|暂停/.test(_vd) ? 'close' : 'warn');
               return `<tr>
               <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.campaignName)}</td>
               <td>${ttypeLabel}</td>
               <td>${fmtMoney(c.cost, cur)}</td>
               <td>${esc(c.adsOrders||0)}</td>
               <td>${fmtPct(c.acos)}</td>
+              <td><span class="diag-badge good" style="background:rgba(110,231,183,.15);color:#6ee7b7">● 进行中</span></td>
               <td>
                 <span class="diag-badge ${vClass}">${esc(c._verdict||'—')}</span>
                 ${c._verdict_reason ? `<div style="font-size:11px;color:var(--sub);margin-top:3px;max-width:280px;white-space:normal;line-height:1.45">${esc(c._verdict_reason)}</div>` : ''}
               </td>
-            </tr>`;}).join('') || '<tr><td colspan="6" style="color:var(--sub)">无运行中广告活动</td></tr>'}</tbody>
+            </tr>`;}).join('') || '<tr><td colspan="7" style="color:var(--sub)">无运行中广告活动</td></tr>'}</tbody>
           </table>
         </div>
       </details>
@@ -5321,70 +5207,33 @@ function enterTestMode() {
           </div>
         </details>` : ''}
 
-      ${(ad.new_campaigns||[]).length ? `
-        <details class="diag-sub" open>
-          <summary>✨ AI 建议新建活动（${ad.new_campaigns.length}）</summary>
-          <div class="diag-sub-body">
-          ${ad.new_campaigns.map((nc, _ncIdx) => {
-            // 兼容旧格式（字符串数组）和新格式（{term, source, reason} 对象数组）
-            const kws = (nc.keywords||[]).map(k =>
-              typeof k === 'string' ? {term: k, source: null, reason: null} : k
-            );
-            const _srcColor = src => {
-              if (/黄金/.test(src||'')) return '#6ee7b7';
-              if (/竞品/.test(src||'')) return '#fcd34d';
-              if (/行业/.test(src||'')) return '#a5b4fc';
-              return 'var(--sub)';
-            };
-            // 分号串：粘到亚马逊后台一行一词或分号串都接受
-            const semiText = kws.map(k => k.term).filter(Boolean).join('; ');
-            return `
-            <div style="margin-top:8px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px">
-              <div style="font-weight:600;margin-bottom:4px">${esc(nc.name)}</div>
-              <div style="font-size:12px;color:var(--sub);line-height:1.7">
-                类型：${esc(nc.type||'—')} ${nc.match_type?`· 匹配：${matchTypeBadge(nc.match_type)}`:''}
-                · 出价：${fmtMoney(nc.suggested_bid,cur)} ${nc.bid_strategy?`(${esc(nc.bid_strategy)})`:''}
-                · 日预算：${fmtMoney(nc.daily_budget,cur)}
-                ${nc.placement_adjustment ? `· 加成：${Object.entries(nc.placement_adjustment).map(([k,v])=>`${esc(k)} +${esc(v)}%`).join(', ')}` : ''}
-              </div>
-              ${kws.length ? `<div style="margin-top:8px">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-                  <span style="font-size:12px;color:var(--sub)">关键词（${kws.length}）</span>
-                  <button class="btn btn-ghost btn-xs" onclick="window.__diagCopy(${JSON.stringify(semiText).replace(/"/g,'&quot;')}, this)">📋 分号复制</button>
-                </div>
-                <table class="diag-table" style="font-size:12px">
-                  <thead><tr><th>关键词</th><th style="width:90px">来源</th><th>选用理由</th></tr></thead>
-                  <tbody>
-                    ${kws.map(k => `<tr>
-                      <td><code>${esc(k.term||'')}</code></td>
-                      <td>${k.source ? `<span style="font-size:11px;font-weight:600;color:${_srcColor(k.source)}">${esc(k.source)}</span>` : '<span style="color:var(--sub)">—</span>'}</td>
-                      <td style="color:var(--sub)">${esc(k.reason||'—')}</td>
-                    </tr>`).join('')}
-                  </tbody>
-                </table>
-              </div>` : ''}
-              ${nc.reason ? `<div style="font-size:12px;color:var(--sub);margin-top:6px">💡 ${esc(nc.reason)}</div>` : ''}
-            </div>`;
-          }).join('')}
-          </div>
-        </details>` : ''}
-
-      ${(ad.negative_keywords||[]).length ? (() => {
-        const negSemiText = ad.negative_keywords
+      ${(ad.negative_keywords||[]).length || (ad._dropped_negative_keywords||[]).length ? (() => {
+        const negList = ad.negative_keywords || [];
+        const negSemiText = negList
           .map(n => typeof n === 'string' ? n : n.keyword)
           .filter(Boolean).join('; ');
+        const dropped = ad._dropped_negative_keywords || [];
         return `
         <details class="diag-sub" open>
-          <summary>🚫 AI 建议否定关键词（${ad.negative_keywords.length}）</summary>
+          <summary>🚫 AI 建议否定关键词（${negList.length}${dropped.length?` · 已剔除 ${dropped.length}`:''}）</summary>
           <div class="diag-sub-body">
-            <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
+            <div style="font-size:11px;color:var(--sub);margin-bottom:8px;padding:6px 10px;background:rgba(252,165,165,.06);border-left:2px solid #fca5a5;border-radius:3px;line-height:1.6">
+              过滤规则：已自动剔除「活动已暂停/关闭」、「与我方黄金词冲突」、「与 AI 推荐的新建活动词重复」三类无效否定 —— 这些词加了等于没加，或者会自相矛盾。
+            </div>
+            ${negList.length ? `<div style="display:flex;justify-content:flex-end;margin-bottom:6px">
               <button class="btn btn-ghost btn-xs" onclick="window.__diagCopy(${JSON.stringify(negSemiText).replace(/"/g,'&quot;')}, this)">📋 分号复制全部</button>
             </div>
-            ${stTable(ad.negative_keywords, [
+            ${stTable(negList, [
               {h:'关键词', f:r=>typeof r==='string'?esc(r):`<code>${esc(r.keyword)}</code>`},
               {h:'匹配类型', f:r=>typeof r==='string'?'—':matchTypeBadge(r.match_type)},
+              {h:'目标活动', f:r=>typeof r==='string'?'—':`<span style="font-size:11px;color:var(--sub)">${esc(r.campaign||'—')}</span>`},
               {h:'原因', f:r=>typeof r==='string'?'—':esc(r.reason||'—')},
-            ])}
+            ])}` : '<div style="color:var(--sub);font-size:12px">无有效否定词建议（全部条目被过滤）</div>'}
+            ${dropped.length ? `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:11px;color:var(--sub)">查看已剔除的 ${dropped.length} 个否定词（及原因）</summary>
+              <div style="margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:4px">
+                ${dropped.map(d => `<div style="font-size:12px;line-height:1.7"><code>${esc(d.keyword||'')}</code> <span style="color:var(--sub)">— ${esc(d.reason||'')}</span></div>`).join('')}
+              </div>
+            </details>` : ''}
           </div>
         </details>`;
       })() : ''}
@@ -5421,8 +5270,12 @@ function enterTestMode() {
     // 5. 竞品 — 类目大盘 + 同款精准 两栏并存
     const pick = (o, ...keys) => { for (const k of keys) { if (o && o[k] != null && o[k] !== '') return o[k]; } return '—'; };
 
-    const _renderCompTable = (top10, totalLabel) => top10.length ? `<table class="diag-table">
-      <thead><tr><th>ASIN</th><th>标题</th><th>品牌</th><th>价格</th><th>月销量</th><th>评论</th><th>星级</th><th>毛利率</th></tr></thead>
+    const _renderCompTable = (top10, totalLabel, opts) => {
+      if (!top10.length) return '';
+      // 精准竞品池：多带一列 LLM 判同款理由 + 出现池数
+      const showJudge = !!(opts && opts.showJudge);
+      return `<table class="diag-table">
+      <thead><tr><th>ASIN</th><th>标题</th><th>品牌</th><th>价格</th><th>月销量</th><th>评论</th><th>星级</th><th>毛利率</th>${showJudge?'<th>判定依据</th>':''}</tr></thead>
       <tbody>${top10.map(c=>`<tr>
         <td><code style="font-size:11px">${esc(pick(c,'ASIN','asin','产品ASIN码'))}</code></td>
         <td style="font-size:11px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(pick(c,'标题','title'))}">${esc(pick(c,'标题','title'))}</td>
@@ -5432,8 +5285,23 @@ function enterTestMode() {
         <td style="font-family:'JetBrains Mono',monospace;font-size:12px">${esc(pick(c,'评论数','reviewCount','reviewQuantity','reviews'))}</td>
         <td style="font-size:12px">${esc(pick(c,'星级','star','rating'))} ⭐</td>
         <td style="font-family:'JetBrains Mono',monospace;font-size:12px">${(()=>{const v=pick(c,'毛利率','grossMarginRate');return v!=='—'?v+'%':'—';})()}</td>
+        ${showJudge?(()=>{
+          const reason = c._judge_reason || '';
+          const by = c._judge_by || '';
+          const app = c._appearance || 0;
+          const badge = by === 'llm_haiku'
+            ? '<span style="font-size:10px;padding:1px 5px;background:rgba(110,231,183,.15);color:#6ee7b7;border-radius:3px;margin-right:4px">🤖 AI判同款</span>'
+            : (by === 'jaccard_fallback'
+                ? '<span style="font-size:10px;padding:1px 5px;background:rgba(252,211,77,.15);color:#fcd34d;border-radius:3px;margin-right:4px">规则法兜底</span>'
+                : '');
+          const appBadge = app > 1
+            ? `<span style="font-size:10px;color:var(--sub);margin-left:4px" title="该 ASIN 在 ${app} 个流量词的搜索结果中都出现，多源验证">×${app}源</span>`
+            : '';
+          return `<td style="font-size:11px;color:var(--sub);max-width:260px;line-height:1.45;white-space:normal">${badge}${esc(reason)}${appBadge}</td>`;
+        })():''}
       </tr>`).join('')}</tbody>
-    </table>` : '';
+    </table>`;
+    };
 
     const _renderCompSummary = (caSum) => {
       if (!caSum || !Object.keys(caSum).length) return '';
@@ -5459,13 +5327,13 @@ function enterTestMode() {
       </div>`;
     };
 
-    const _renderCompBlock = (ca, title, hint) => {
+    const _renderCompBlock = (ca, title, hint, opts) => {
       const caType = (ca || {}).type || 'empty';
       const caSum = (ca || {}).summary || {};
       const caTop10 = Array.isArray((ca || {}).top10) ? ca.top10 : [];
       let body;
       if (caType === 'structured' && Object.keys(caSum).length) {
-        body = _renderCompSummary(caSum) + _renderCompTable(caTop10, '');
+        body = _renderCompSummary(caSum) + _renderCompTable(caTop10, '', opts);
       } else if ((caType === 'text' || caType === 'unknown') && ca && ca.raw_text) {
         body = `<pre style="font-size:11px;color:var(--sub);white-space:pre-wrap;max-height:240px;overflow-y:auto;background:var(--surface2);padding:10px;border-radius:6px;border:1px solid var(--border)">${esc(ca.raw_text)}</pre>`;
       } else {
@@ -5621,15 +5489,229 @@ function enterTestMode() {
         </div>`;
     })() : '';
 
-    let compHtml = mcaHtml + _renderCompBlock(ca, '🎯 类目大盘 Top10',
-      'Sorftime category_report — 整个 BSR 类目 Top100（可能含异材质/异款式产品）');
+    // ===== 真实类目信息面板（积加 BSR 优先，Sorftime 次要）=====
+    // 旧版用"精准同款池 sub_cat 众数 vs Sorftime 解析"对比硬判挂错，会误导用户改类目。
+    // 新版用积加 sellersRankList（亚马逊页面权威）作真实类目；
+    // 精准池 sub_cat 分布只作"赛道分布"参考，不再翻盘亚马逊真实分类。
+    const catMis = data.category_mismatch || {};
+    const erpBsr = data.erp_bsr || null;
+    const erpLeaf = (erpBsr && erpBsr.leaf) || null;
+    const erpTop  = (erpBsr && erpBsr.top)  || null;
+    const _srcLabel = catMis.source === 'erp'
+      ? '积加 sellersRankList（亚马逊页面权威）'
+      : catMis.source === 'sorftime'
+      ? 'Sorftime 详情解析（次要，ERP 无数据时兜底）'
+      : '（无数据源）';
+    const catInfoPanel = (erpLeaf || catMis.main_asin_sub_cat) ? `
+      <div style="margin-bottom:14px;padding:12px 14px;background:rgba(110,231,183,.06);border:1px solid rgba(110,231,183,.30);border-radius:8px">
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px">
+          📂 亚马逊真实类目
+          <span style="font-size:10px;font-weight:400;color:var(--sub);margin-left:6px">数据源：${_srcLabel}</span>
+        </div>
+        <div style="font-size:12px;line-height:1.75;color:var(--text)">
+          ${erpLeaf ? `
+            <div>
+              细分类目：<strong style="color:#6ee7b7">${esc(erpLeaf.name||'—')}</strong>
+              ${erpLeaf.rank!=null ? `<span style="color:var(--sub);margin-left:4px">BSR #${erpLeaf.rank}</span>` : ''}
+              ${erpLeaf.node_id ? `<code style="font-size:10px;margin-left:8px;color:var(--sub)">node ${erpLeaf.node_id}</code>` : ''}
+            </div>
+            ${erpTop && erpTop.name && erpTop.name !== erpLeaf.name ? `
+            <div>大类：${esc(erpTop.name)}${erpTop.rank!=null ? `<span style="color:var(--sub);margin-left:4px">BSR #${erpTop.rank}</span>` : ''}</div>` : ''}
+          ` : `
+            <div>细分类目：<strong>${esc(catMis.main_asin_sub_cat||'—')}</strong>
+              ${catMis.main_asin_node_id ? `<code style="font-size:10px;margin-left:8px;color:var(--sub)">node ${catMis.main_asin_node_id}</code>` : ''}
+            </div>
+            ${catMis.main_asin_main_cat ? `<div>大类：${esc(catMis.main_asin_main_cat)}</div>` : ''}
+          `}
+          ${(catMis.evidence_top3||[]).length ? `
+            <div style="margin-top:6px;padding-top:6px;border-top:1px dashed rgba(110,231,183,.25);font-size:11px;color:var(--sub)">
+              <strong style="color:var(--text);font-weight:600">精准同款池赛道分布</strong>：
+              ${catMis.evidence_top3.map(e=>`<code style="font-size:10px;margin-right:6px">${esc(e.category)}</code>×${e.count}`).join(' · ')}
+              <span style="margin-left:4px">（仅作赛道分布参考；亚马逊给你的真实分类以上方为准）</span>
+            </div>
+          ` : ''}
+        </div>
+      </div>` : '';
+
+    // 兜底告警：ERP+Sorftime 都没拿到主 ASIN 类目时才显示（极少触发）
+    const catMisBanner = (catMis.is_mismatch && catMis.source === 'none') ? `
+      <div style="margin-bottom:14px;padding:14px 16px;background:rgba(239,68,68,.10);border:1.5px solid rgba(239,68,68,.55);border-radius:8px">
+        <div style="font-size:13px;font-weight:700;color:#fca5a5;margin-bottom:8px">⚠ 主 ASIN 类目数据缺失 —— 类目大盘 / 季节性 / 行业大词 不可信</div>
+        <div style="font-size:12px;color:var(--text);line-height:1.75">
+          • 积加 sellersRankList 和 Sorftime 详情解析都未返回主 ASIN 的细分类目<br>
+          • 精准同款池众数类目：<strong style="color:#6ee7b7">${esc(catMis.real_sub_cat_mode||'—')}</strong>
+            <span style="color:var(--sub)">（${catMis.real_sub_cat_count||0}/${catMis.evidence_total||0} 个同款竞品，置信度 ${Math.round((catMis.confidence||0)*100)}%）</span><br>
+          • 行动：优先看下方「<strong>🎯 同款精准 Top10</strong>」做赛道判断
+        </div>
+      </div>` : '';
+
+    let compHtml = mcaHtml + catInfoPanel + catMisBanner + _renderCompBlock(ca, '🎯 类目大盘 Top10',
+      catMis.is_mismatch
+        ? '⚠ 数据基于不确定类目，仅展示不可参考'
+        : 'Sorftime category_report — 整个 BSR 类目 Top100（可能含异材质/异款式产品）');
     if (_pcaStructured) {
       compHtml += _renderCompBlock(pca, '🎯 同款精准 Top10',
-        '按 listing 标题特征词二次搜出来的真正抢订单对手，优先参考这一栏');
+        '流量词召回 → Claude Haiku 逐条判同款（替代了之前的 Jaccard 规则法，跨类目也能识别真同款）',
+        {showJudge: true});
     } else {
       compHtml += `<div style="margin-bottom:8px;padding:8px 12px;background:var(--surface2);border:1px dashed var(--border);border-radius:6px;font-size:12px;color:var(--sub)">
         🎯 <strong>同款精准 Top10</strong>：暂无（特征词搜索为空或 Sorftime 在该站点未返回数据）
       </div>`;
+    }
+
+    // ===== 竞品关键词反查 — 只展示「新机会」（其他状态对运营无动作意义，已过滤）=====
+    // 新机会 = 多个竞品都在打、但我方未投放/listing 未覆盖/不在黑名单/不是黄金词
+    const ckwPool = data.competitor_keywords_pool || [];
+    const ckwMeta = data.competitor_keywords_pool_meta || {};
+    const ckwQueried = ckwMeta.competitors_queried || [];
+    const ckwQuerySource = ckwMeta.query_source || 'auto';
+    const ckwSeed = ckwMeta.seed_keywords || [];
+    const ckwStats = ckwMeta.filter_stats || {};
+    const ckwByStatus = ckwStats.by_status || {};
+    const compKwHtml = `<details open class="diag-collapsible" style="margin-bottom:18px">
+      <summary style="cursor:pointer;display:flex;align-items:center;gap:8px;flex-wrap:wrap;user-select:none">
+        <span class="collapse-arrow">▾</span>
+        <span style="font-size:14px;font-weight:700">🔑 竞品关键词反查 — 新机会词${ckwPool.length ? `（${ckwPool.length}）` : ''}</span>
+        <span style="font-size:11px;color:var(--sub)">${ckwQueried.length} 个精准竞品的反查词聚合 → 仅留竞品在打、我方未触及的词</span>
+        <span style="font-size:11px;color:var(--muted);margin-left:auto">点击折叠</span>
+      </summary>
+      ${ckwQuerySource === 'user_seed' ? `<div style="margin-bottom:8px;padding:8px 12px;background:rgba(165,180,252,.10);border-left:3px solid #a5b4fc;border-radius:4px;font-size:12px;color:var(--text)">
+        ✦ 本次诊断用了你手动指定的关键词找竞品：${ckwSeed.map(k=>`<code style="font-size:11px;margin:0 2px">${esc(k)}</code>`).join(' ')}
+      </div>` : ''}
+      ${ckwPool.length === 0 ? `<div style="color:var(--sub);font-size:12px;padding:8px 0">
+        ${ckwQueried.length === 0
+          ? '暂无反查数据（精准竞品池为空 / Sorftime 不支持本站点 / 反查接口在该站不可用）'
+          : `扫到 ${ckwStats.total_scanned||0} 个词但<strong>无新机会</strong> —— 全部已在我方投放/已覆盖/已是黄金词/已加黑名单（说明你的关键词覆盖已经做得很全面）`
+        }
+      </div>` : `
+        <table class="diag-table">
+          <thead><tr>
+            <th style="width:60px">优先级</th>
+            <th>关键词</th>
+            <th style="width:80px">竞品数</th>
+            <th style="width:100px">月搜</th>
+            <th style="width:140px">竞品最佳排名</th>
+            <th>推荐理由</th>
+            <th style="width:46px"></th>
+          </tr></thead>
+          <tbody>${ckwPool.map(x => {
+            const tierMap = {
+              S: {label:'🔥', color:'#f97316', bg:'rgba(249,115,22,.12)'},
+              A: {label:'✓',  color:'#22c55e', bg:'rgba(34,197,94,.10)'},
+              B: {label:'○',  color:'#a5b4fc', bg:'rgba(165,180,252,.10)'},
+              C: {label:'△',  color:'#94a3b8', bg:'rgba(148,163,184,.08)'}
+            };
+            const t = tierMap[x.tier] || tierMap.C;
+            const exp = x.best_exposure;
+            let expHtml = '<span style="color:var(--muted)">—</span>';
+            if (exp) {
+              const pg = exp.page, rk = exp.rank, tot = exp.total;
+              let expColor = '#94a3b8';
+              if (pg === 1 && rk <= 10) expColor = '#22c55e';
+              else if (pg === 1 && rk <= 20) expColor = '#a5b4fc';
+              else if (pg === 1) expColor = '#fcd34d';
+              expHtml = `<span style="color:${expColor};font-size:11px;font-weight:600">第${pg}页 · 第${rk}/${tot}位</span>`;
+            }
+            const termJson = JSON.stringify(x.term||'').replace(/"/g,'&quot;');
+            return `<tr>
+              <td><span style="display:inline-block;padding:2px 8px;background:${t.bg};color:${t.color};border-radius:10px;font-size:11px;font-weight:600">${t.label}</span></td>
+              <td><code style="font-size:12px">${esc(x.term||'')}</code></td>
+              <td style="text-align:center"><strong>${x.occurrences||1}</strong> <span style="font-size:10px;color:var(--sub)" title="${esc((x.sources||[]).join(', '))}">个</span></td>
+              <td style="font-family:'JetBrains Mono',monospace">${x.monthly_search!=null ? Number(x.monthly_search).toLocaleString() : '—'}</td>
+              <td>${expHtml}</td>
+              <td style="font-size:11px;color:var(--sub);max-width:280px;line-height:1.5">${esc(x.recommend_reason||'')}</td>
+              <td><button class="btn btn-ghost btn-xs" style="padding:2px 6px;font-size:11px" onclick="window.__diagCopy(${termJson}, this)" title="复制此关键词">📋</button></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;flex-wrap:wrap;gap:8px">
+          <div style="font-size:11px;color:var(--sub)">
+            扫描 ${ckwStats.total_scanned||0} 个去重词；过滤掉 ${(ckwByStatus['我方已投放']||0)+(ckwByStatus['listing 已覆盖']||0)+(ckwByStatus['已是黄金词']||0)+(ckwByStatus['已尝试无果']||0)} 个（已投放 ${ckwByStatus['我方已投放']||0} / listing 已覆盖 ${ckwByStatus['listing 已覆盖']||0} / 黄金词 ${ckwByStatus['已是黄金词']||0} / 黑名单 ${ckwByStatus['已尝试无果']||0}）
+          </div>
+          <button class="btn btn-ghost btn-xs" onclick="window.__diagCopy(${JSON.stringify(ckwPool.map(x=>x.term).join('; ')).replace(/"/g,'&quot;')}, this)">📋 分号复制全部新机会词</button>
+        </div>
+      `}
+    </details>
+
+    <!-- 竞品没找对 / 用关键词重新找 入口 -->
+    <div style="margin-top:14px;padding:12px 14px;background:linear-gradient(135deg,rgba(168,162,158,.06),rgba(168,162,158,.02));border:1px solid var(--border);border-radius:8px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px">🛠 觉得竞品没找对？用关键词重新找</div>
+      <div style="font-size:12px;color:var(--sub);line-height:1.7;margin-bottom:10px">
+        系统默认按「我们的流量词 / listing 标题特征词」自动找竞品 —— 如果你看上面 <strong>同款精准 Top10</strong> 里出现异类材质/异类形态/异类用途的产品，
+        说明自动推断的搜索词不够精准。可以直接输入 <strong>1-3 个</strong> 你认定的核心关键词（如 "wireless dog fence" / "playpen for cat" 等），
+        重新跑一次：竞品赛道 + 反查关键词 + AI 综合都会基于这些新关键词重新生成。
+      </div>
+      <div id="seedKwInputs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <input class="diag-seed-kw" data-idx="0" placeholder="关键词 1（必填）"
+               value="${esc(ckwSeed[0]||'')}"
+               style="flex:1;min-width:180px;padding:8px 10px;font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text)">
+        <input class="diag-seed-kw" data-idx="1" placeholder="关键词 2（选填）"
+               value="${esc(ckwSeed[1]||'')}"
+               style="flex:1;min-width:180px;padding:8px 10px;font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text)">
+        <input class="diag-seed-kw" data-idx="2" placeholder="关键词 3（选填）"
+               value="${esc(ckwSeed[2]||'')}"
+               style="flex:1;min-width:180px;padding:8px 10px;font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text)">
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="window.__diagRefindCompetitors(this)">🔄 用这些词重新找竞品 + 重跑诊断</button>
+        <span id="refindStatus" style="font-size:11px;color:var(--sub)"></span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6">
+        ⏱ 重新跑会重新拉 Sorftime（30s-1min）+ 走一次 AI 推理（2-3 min），总耗时 3-5 分钟。<br>
+        💡 输入英文/本站语言关键词命中率最高（Sorftime 数据来自亚马逊本站搜索结果）。
+      </div>
+    </div>`;
+
+    compHtml += compKwHtml;
+
+    // ===== 反推真实行业大词（基于 LLM 同款竞品标题 n-gram 频次）=====
+    // 类目挂错时这是唯一可信的"行业大词"来源；类目挂对时仍作 listing 优化补充
+    const derivedKws = data.derived_industry_keywords || [];
+    if (derivedKws.length) {
+      const missedKws = derivedKws.filter(k => !k.in_our_listing && (k.recommend_reason||'').length > 0);
+      const compHint = catMis.is_mismatch
+        ? '⚠ 类目挂错 → 这是当前唯一可信的行业大词来源（替代了上方失真的「行业大词」）'
+        : '基于 LLM 同款竞品标题做 1/2/3-gram 频次反推，仅展示我方未覆盖且可推荐的';
+      const _ngramBadge = n => {
+        const colors = {1: '#a5b4fc', 2: '#fcd34d', 3: '#6ee7b7'};
+        const labels = {1: '大词', 2: '短语词', 3: '长尾词'};
+        return `<span style="font-size:10px;padding:1px 5px;background:rgba(165,180,252,.10);color:${colors[n]||'var(--sub)'};border-radius:3px">${labels[n]||n+'gram'}</span>`;
+      };
+      compHtml += `<details open class="diag-collapsible" style="margin-top:14px;padding:14px 16px;background:linear-gradient(135deg,rgba(110,231,183,.06),rgba(110,231,183,.02));border:1px solid rgba(110,231,183,.35);border-radius:8px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none">
+          <span class="collapse-arrow" style="color:#6ee7b7">▾</span>
+          <span style="font-size:14px;font-weight:700">🔑 反推真实行业大词（${missedKws.length}）</span>
+          <span style="font-size:11px;color:var(--sub)">${compHint}</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:auto">点击折叠</span>
+        </summary>
+        ${missedKws.length ? `<div style="margin-top:6px">
+          <div style="font-size:12px;font-weight:600;color:#fcd34d;margin-bottom:6px">⚠ 我方 listing 未覆盖且可推荐（${missedKws.length}）—— 优先加进标题/Bullets</div>
+          <table class="diag-table">
+            <thead><tr>
+              <th>词/短语</th>
+              <th style="width:70px">类型</th>
+              <th style="width:120px">竞品命中</th>
+              <th style="width:80px">总频次</th>
+              <th>推荐理由</th>
+              <th style="width:46px"></th>
+            </tr></thead>
+            <tbody>${missedKws.slice(0,20).map(k=>{
+              const tokenJson = JSON.stringify(k.token||'').replace(/"/g,'&quot;');
+              return `<tr>
+                <td><code>${esc(k.token||'')}</code></td>
+                <td>${_ngramBadge(k.ngram||1)}</td>
+                <td><strong>${k.competitor_count||0}</strong> 个同款竞品</td>
+                <td style="font-family:'JetBrains Mono',monospace">${k.occurrences||0}</td>
+                <td style="font-size:11px;color:var(--sub);max-width:260px;line-height:1.5">${esc(k.recommend_reason||'')}</td>
+                <td><button class="btn btn-ghost btn-xs" style="padding:2px 6px;font-size:11px" onclick="window.__diagCopy(${tokenJson}, this)" title="复制">📋</button></td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>
+          <div style="display:flex;justify-content:flex-end;margin-top:6px">
+            <button class="btn btn-ghost btn-xs" onclick="window.__diagCopy(${JSON.stringify(missedKws.slice(0,20).map(k=>k.token).join('; ')).replace(/"/g,'&quot;')}, this)">📋 分号复制全部缺失词</button>
+          </div>
+        </div>` : '<div style="font-size:12px;color:var(--sub);padding:6px 0">暂无可推荐的未覆盖行业词（你的 listing 已覆盖大部分行业共识词）</div>'}
+      </details>`;
     }
 
     // 6. 用户评论 / VOC（我方 + 行业 VOC 池）
@@ -5737,15 +5819,24 @@ function enterTestMode() {
     // Sorftime 拉到的类目趋势（即使 AI 解析失败，季节性原始数据还在 data.season_trend）
     const seasonRaw = data.season_trend;
     const seasonRawHasData = seasonRaw && (typeof seasonRaw === 'object' ? Object.keys(seasonRaw).length : String(seasonRaw).length > 50);
+    const seasonUnreliable = !!data.season_trend_unreliable;
     const seasonHtml = `
       ${_aiHint('季节性分析')}
+      ${seasonUnreliable ? `<div style="margin-bottom:12px;padding:12px 14px;background:rgba(239,68,68,.10);border:1.5px solid rgba(239,68,68,.55);border-radius:8px">
+        <div style="font-size:13px;font-weight:700;color:#fca5a5;margin-bottom:6px">⚠ 季节性数据不可信</div>
+        <div style="font-size:12px;color:var(--text);line-height:1.7">
+          亚马逊给主 ASIN 挂错类目（详见上方「五、市场竞争分析」红色横幅）。
+          Sorftime 拉的类目趋势是基于错类目 nodeId 的，<strong>跟你产品真实赛道的季节曲线可能完全无关</strong>。
+          <br>建议：① 先去亚马逊后台改类目 → 重新诊断 ② 暂时按品类经验判断旺季（如宠物泳池 = 5-8 月）
+        </div>
+      </div>` : ''}
       ${sn.peak_months ? `<div>🌞 旺季月份：<strong>${(sn.peak_months||[]).join(', ')}</strong></div>` : ''}
       ${sn.current_phase ? `<div style="margin-top:6px">📍 当前阶段：${esc(sn.current_phase)}</div>` : ''}
       ${sn.impact ? `<div style="margin-top:6px;color:var(--sub)">${esc(sn.impact)}</div>` : ''}
-      ${!sn.peak_months && seasonRawHasData ? `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--sub)">📦 Sorftime 原始类目趋势数据（AI 未解析，可手动查看）</summary>
+      ${!sn.peak_months && seasonRawHasData ? `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--sub)">📦 Sorftime 原始类目趋势数据${seasonUnreliable?'（不可信 — 仅供调试）':'（AI 未解析，可手动查看）'}</summary>
         <pre style="font-size:11px;color:var(--sub);white-space:pre-wrap;max-height:280px;overflow-y:auto;background:var(--surface2);padding:10px;border-radius:6px;border:1px solid var(--border);margin-top:6px">${esc(typeof seasonRaw === 'string' ? seasonRaw : JSON.stringify(seasonRaw, null, 2))}</pre>
       </details>` : ''}
-      ${!sn.peak_months && !seasonRawHasData ? '<div style="color:var(--sub)">季节性数据有限（Sorftime category_trend 在该站点/类目未返回数据）</div>' : ''}`;
+      ${!sn.peak_months && !seasonRawHasData && !seasonUnreliable ? '<div style="color:var(--sub)">季节性数据有限（Sorftime category_trend 在该站点/类目未返回数据）</div>' : ''}`;
 
     // ===== 八、AI 综合诊断（4 层结构，单数据源消除路线图/清单不一致）=====
     // 渲染顺序：摘要 → 评分卡 + 决策逻辑 → 路线图（含聚合动作）→ 完整清单 → 风险红线 → 兜底打法
@@ -5954,10 +6045,66 @@ function enterTestMode() {
         <div style="margin-top:8px">${gsHtml}</div>
       </details>` : '';
 
+    // ===== AI 新建活动建议（从「广告诊断」段迁过来，作为 AI 综合的一部分）=====
+    const newCampCard = ((ad.new_campaigns||[]).length || (ad._dropped_new_campaign_keywords||[]).length) ? (() => {
+      const ncList = ad.new_campaigns || [];
+      return `
+      <div style="margin-bottom:14px;padding:14px 16px;background:linear-gradient(135deg,rgba(110,231,183,.08),rgba(110,231,183,.02));border:1px solid rgba(110,231,183,.35);border-radius:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;color:#6ee7b7;letter-spacing:1.5px">✨ AI 新建活动建议（${ncList.length}）</div>
+          <div style="font-size:11px;color:var(--sub)">关键词已自动去重：黑名单/重灾区里的词不再推荐</div>
+        </div>
+        ${ncList.map(nc => {
+          const kws = (nc.keywords||[]).map(k => typeof k === 'string' ? {term:k,source:null,reason:null} : k);
+          const dropped = nc._dropped_keywords || [];
+          const _srcColor = src => {
+            if (/黄金/.test(src||'')) return '#6ee7b7';
+            if (/竞品/.test(src||'')) return '#fcd34d';
+            if (/行业/.test(src||'')) return '#a5b4fc';
+            return 'var(--sub)';
+          };
+          const semiText = kws.map(k => k.term).filter(Boolean).join('; ');
+          return `
+          <div style="margin-top:8px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px">
+            <div style="font-weight:600;margin-bottom:4px">${esc(nc.name||'')}</div>
+            <div style="font-size:12px;color:var(--sub);line-height:1.7">
+              类型：${esc(nc.type||'—')} ${nc.match_type?`· 匹配：${matchTypeBadge(nc.match_type)}`:''}
+              · 出价：${fmtMoney(nc.suggested_bid,cur)} ${nc.bid_strategy?`(${esc(nc.bid_strategy)})`:''}
+              · 日预算：${fmtMoney(nc.daily_budget,cur)}
+              ${nc.placement_adjustment ? `· 加成：${Object.entries(nc.placement_adjustment).map(([k,v])=>`${esc(k)} +${esc(v)}%`).join(', ')}` : ''}
+            </div>
+            ${kws.length ? `<div style="margin-top:8px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <span style="font-size:12px;color:var(--sub)">关键词（${kws.length}）</span>
+                <button class="btn btn-ghost btn-xs" onclick="window.__diagCopy(${JSON.stringify(semiText).replace(/"/g,'&quot;')}, this)">📋 分号复制</button>
+              </div>
+              <table class="diag-table" style="font-size:12px">
+                <thead><tr><th>关键词</th><th style="width:90px">来源</th><th>选用理由</th></tr></thead>
+                <tbody>
+                  ${kws.map(k => `<tr>
+                    <td><code>${esc(k.term||'')}</code></td>
+                    <td>${k.source ? `<span style="font-size:11px;font-weight:600;color:${_srcColor(k.source)}">${esc(k.source)}</span>` : '<span style="color:var(--sub)">—</span>'}</td>
+                    <td style="color:var(--sub)">${esc(k.reason||'—')}</td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>` : ''}
+            ${dropped.length ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px;color:var(--sub)">已剔除 ${dropped.length} 个关键词（已是黑名单/重灾区）</summary>
+              <div style="margin-top:4px;padding:6px 8px;background:var(--surface);border-radius:4px;font-size:11px;line-height:1.6">
+                ${dropped.map(d => `<div><code>${esc(d.term||'')}</code> <span style="color:var(--sub)">— ${esc(d.reason||'')}</span></div>`).join('')}
+              </div>
+            </details>` : ''}
+            ${nc.reason ? `<div style="font-size:12px;color:var(--sub);margin-top:6px">💡 ${esc(nc.reason)}</div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>`;
+    })() : '';
+
     const aiHtml = `
       ${esCard}
       ${dsCard}
       ${dlCard}
+      ${newCampCard}
       ${rmCard}
       ${alCard}
       ${rrCard}
@@ -6073,6 +6220,65 @@ function enterTestMode() {
       btn.disabled = false; btn.innerHTML = orig;
     }
   };
+  // 用用户输入的 1-3 个种子关键词重新跑诊断（重新找竞品 + 重跑 AI）
+  // POST /api/diagnose with seed_keywords，复用现有 runDiagnose 进度条 / 渲染管线
+  window.__diagRefindCompetitors = async function(btn){
+    if (!_lastReport){ alert('当前没有上次报告'); return; }
+    const inputs = Array.from(document.querySelectorAll('input.diag-seed-kw'));
+    const seeds = inputs.map(x => (x.value||'').trim()).filter(Boolean);
+    if (!seeds.length){
+      alert('至少输入 1 个关键词');
+      return;
+    }
+    if (seeds.length > 3){
+      alert('最多 3 个关键词');
+      return;
+    }
+    const lastAsins = _lastReport.asins || [];
+    const lastMarketId = (_lastReport.market || {}).marketId;
+    if (!lastAsins.length || !lastMarketId){
+      alert('上次报告缺 ASIN / marketId，无法重跑');
+      return;
+    }
+    const statusEl = document.getElementById('refindStatus');
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--sub)">⏳ 提交重跑请求…</span>';
+    const orig = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '重新分析中…';
+
+    // 复用主进度条（setProgress 内部会 add .show）
+    setProgress(20, `用关键词 [${seeds.join(', ')}] 重新找竞品中…`);
+    const t0 = Date.now();
+    const timer = setInterval(()=>{
+      const elapsed = Math.floor((Date.now() - t0)/1000);
+      let pct, sub;
+      if (elapsed < 60){ pct = 20 + elapsed/60*30; sub = `重新拉 Sorftime 竞品数据…（${elapsed}s）`; }
+      else if (elapsed < 240){ pct = 50 + (elapsed-60)/180*40; sub = `Claude 重跑诊断…（${elapsed}s）`; }
+      else { pct = 90; sub = `仍在生成（${elapsed}s）`; }
+      setProgress(Math.min(pct,90), sub);
+    }, 1000);
+
+    try {
+      const resp = await apiPost('/api/diagnose', {
+        asins: lastAsins, marketId: lastMarketId, days: 30,
+        seed_keywords: seeds,
+        force_refresh: false,  // 数据缓存还能用，只重跑竞品/AI
+      });
+      clearInterval(timer);
+      setProgress(100, `完成（${Math.floor((Date.now()-t0)/1000)}s）`);
+      setTimeout(hideProgress, 600);
+      renderReport(resp);
+      // renderReport 整页重画 → statusEl/btn 都被替换，需要重新 query DOM
+      const newStatusEl = document.getElementById('refindStatus');
+      if (newStatusEl) newStatusEl.innerHTML = '<span style="color:#6ee7b7">✓ 已用新关键词重新生成</span>';
+    } catch(e){
+      clearInterval(timer);
+      hideProgress();
+      if (statusEl) statusEl.innerHTML = `<span style="color:#fca5a5">✗ 失败：${(e&&e.message)||e}</span>`;
+      // 失败时 renderReport 没跑，btn 还在 → 这里恢复
+      btn.disabled = false; btn.innerHTML = orig;
+    }
+  };
+
   window.__diagReparseReset = function(btn){
     const ta = document.getElementById('reparseTextarea');
     if (ta && _lastReport && _lastReport.ai && _lastReport.ai.raw != null){
@@ -6312,7 +6518,7 @@ function enterTestMode() {
       lines.push(`- 搜索词汇总：共 ${stSummary.total_terms} 个 / 黑名单 ${stSummary.blacklist_count} (浪费 ${cur}${(+stSummary.blacklist_total_waste||0).toFixed(2)}) / 黄金词 ${stSummary.winner_count} / 重灾区 ${stSummary.disaster_count} / 竞品ASIN ${stSummary.competitor_count}`);
       lines.push('');
     }
-    lines.push(`| 活动 | 花费 | 订单 | ACOS | 评价 |`);
+    lines.push(`| 活动 | 花费 | 订单 | ACOS | 建议 |`);
     lines.push(`|---|---|---|---|---|`);
     const _activeCamps = camps.filter(c => c.state === 0);
     const _pausedCamps = camps.filter(c => c.state !== 0);
