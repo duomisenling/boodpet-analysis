@@ -1355,16 +1355,30 @@ details.diag-collapsible:not([open]) .collapse-arrow {
       <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:center;flex-wrap:wrap;gap:12px">
         <button class="diag-go-btn" id="diagGoBtn" onclick="startDiagnosis()">开始诊断</button>
         <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);cursor:pointer"
+               title="数据拉取窗口（积加广告/搜索词/listing/库存）&#10;30 天：默认，最快，适合多数日常诊断&#10;60/90 天：成熟品趋势更稳，长尾词样本更全，但数据量大可能多耗 30s-2min&#10;新品（上架<14天）此设置无效 —— 自动用全生命周期窗口">
+          📅 数据范围
+          <select id="diagDays" style="background:transparent;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:2px 4px;font-size:12px;cursor:pointer">
+            <option value="30">30 天</option>
+            <option value="60">60 天</option>
+            <option value="90">90 天</option>
+          </select>
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);cursor:pointer"
+               title="默认展开同父体下所有兄弟变体一起诊断（销量/库存/广告/评论跨变体聚合），运营视角看一整个产品。&#10;勾选此项 → 只诊断你输入的 ASIN，不展开兄弟变体（更快，~30s-2min）。&#10;输入多个 ASIN 时默认会把各自父体下的兄弟变体都拉进来合并诊断（上限 8 个 ASIN）。&#10;评估整个产品健康度 / 决定砍哪个变体 → 不勾；只想盯单一变体表现 → 勾选">
+          <input type="checkbox" id="diagSingleVariantOnly" style="cursor:pointer">
+          📍 只诊断输入 ASIN（不展开变体）
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);cursor:pointer"
                title="积加广告/搜索词数据默认缓存 4 小时供多人共享。如果你刚修改过广告活动（暂停/启动/调价）想立刻看到效果，勾选此项绕过缓存重新拉取，会多耗时 30s-2min">
           <input type="checkbox" id="diagForceRefresh" style="cursor:pointer">
           🔄 强制刷新（绕过缓存拉最新）
         </label>
-        <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);cursor:pointer"
-               title="默认只诊断你输入的 ASIN（若是变体子 ASIN，只看它一个的数据）。&#10;勾选后会展开同父体下所有兄弟变体一起诊断（销量/库存/广告/评论跨变体聚合），多耗时 30s-2min。&#10;诊断单一变体表现 → 不勾；评估所有变体健康度 / 决定砍哪个变体 → 勾选">
-          <input type="checkbox" id="diagIncludeVariants" style="cursor:pointer">
-          🔀 诊断所有变体
-        </label>
         <span id="diagStatus" style="font-size:12px;color:var(--sub)"></span>
+        <!-- 报告历史：最近 5 次诊断存浏览器 localStorage，关页面也不丢 -->
+        <div style="position:relative;margin-left:auto">
+          <button id="diagHistoryBtn" type="button" onclick="window._bpToggleHistoryPanel()" style="display:none;background:transparent;border:1px solid var(--border);border-radius:4px;padding:6px 10px;font-size:12px;color:var(--sub);cursor:pointer">📚 历史 (0)</button>
+          <div id="diagHistoryPanel" style="display:none;position:absolute;right:0;top:calc(100% + 6px);width:320px;max-height:380px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.15);z-index:1000"></div>
+        </div>
       </div>
     </div>
 
@@ -4429,7 +4443,11 @@ document.addEventListener('keydown', e => {
       if (meta) meta.textContent = `已用 ${elapsed}s / 通常 3-8 分钟（积加限流 1秒/次，多人并发会更久）`;
     }, 1000);
     const forceRefresh = !!($('diagForceRefresh') && $('diagForceRefresh').checked);
-    const includeVariants = !!($('diagIncludeVariants') && $('diagIncludeVariants').checked);
+    const singleVariantOnly = !!($('diagSingleVariantOnly') && $('diagSingleVariantOnly').checked);
+    const includeVariants = !singleVariantOnly;
+    // 数据窗口（30/60/90）：用户选 60/90 时积加拉的广告/搜索词/listing/库存都跟着抬窗口；
+    // 新品（上架<14天）后端会自动用全生命周期，前端这里传啥都无所谓
+    const diagDays = parseInt(($('diagDays') && $('diagDays').value) || '30', 10) || 30;
     // 找竞品种子关键词（可选）：从输入框读，逗号/中文逗号/空格都接受，最多 3 个
     const seedRaw = ($('diagSeedKeywords') && $('diagSeedKeywords').value || '').trim();
     const seedKeywords = seedRaw
@@ -4437,14 +4455,15 @@ document.addEventListener('keydown', e => {
       : [];
     try {
       const data = await apiPost('/api/diagnose', {
-        asins, marketId, days: 30, force_refresh: forceRefresh,
+        asins, marketId, days: diagDays, force_refresh: forceRefresh,
         include_variants: includeVariants,
         ...(seedKeywords.length ? { seed_keywords: seedKeywords } : {}),
       });
       clearInterval(timer);
-      const _modeLabel = includeVariants ? ' · 多变体模式' : '';
+      const _modeLabel = singleVariantOnly ? ' · 单变体模式' : '';
       const _seedLabel = seedKeywords.length ? ` · 用关键词 ${seedKeywords.join('/')}` : '';
-      setProgress(100, `完成（共用时 ${Math.floor((Date.now()-t0)/1000)}s${forceRefresh ? ' · 已绕过缓存' : ''}${_modeLabel}${_seedLabel}）`);
+      const _daysLabel = diagDays !== 30 ? ` · ${diagDays} 天窗口` : '';
+      setProgress(100, `完成（共用时 ${Math.floor((Date.now()-t0)/1000)}s${forceRefresh ? ' · 已绕过缓存' : ''}${_daysLabel}${_modeLabel}${_seedLabel}）`);
       setTimeout(hideProgress, 600);
       renderReport(data);
       // 强制刷新是一次性动作，诊断完成后自动取消勾选，避免下次默认还是慢路径
@@ -5256,6 +5275,28 @@ document.addEventListener('keydown', e => {
     const stDis = sa.disasters || [];
     const stCompAsin = sa.competitor_asins || [];
 
+    // 【黄金词 AI 二次判定 · 老板需求：只展示 AI 验证为"真黄金词"的】
+    // AI 在 ad.winners_review[] 给每条候选词出 verdict（real / suspect_coincidence / needs_observation），
+    // 这里按 keyword（lower 化）做 join，过滤只保留 verdict='real' 给运营看。
+    // 兜底：旧报告或 AI 没出 winners_review 时，回退到展示全部候选 + 横幅提示"AI 未判定"。
+    const _winnersReview = ad.winners_review || [];
+    // trim + lower：LLM 输出的 keyword 经常多空格 / 大小写抖，统一规范化两端，避免错过 real 判定
+    const _normKw = s => String(s || '').trim().toLowerCase();
+    const _reviewMap = Object.fromEntries(
+      _winnersReview.map(r => [_normKw(r.keyword), r])
+    );
+    const _winnersAiVetted = _winnersReview.length > 0;
+    const stWinAll = _winnersAiVetted
+      ? stWin.map(w => ({...w, _review: _reviewMap[_normKw(w.keyword)] || null}))
+      : stWin;
+    const stWinDisplay = _winnersAiVetted
+      ? stWinAll.filter(w => w._review && w._review.verdict === 'real')
+      : stWinAll;
+    // AI 把全部候选都判为 suspect/needs_observation 时，stWinDisplay 为空但 stWinAll 非空 ——
+    // 这是需要展示给运营看的重要信号（系统正常，只是 AI 全过滤了），不要让板块整个消失
+    const _aiRejectedAll = _winnersAiVetted && stWinDisplay.length === 0 && stWinAll.length > 0;
+    const _pausedWinnersInDisplay = stWinDisplay.filter(w => w.from_paused_campaign).length;
+
     // 子工具：标准搜索词表格
     const stTable = (rows, cols) => `
       <table class="diag-table"><thead><tr>${cols.map(c=>`<th>${c.h}</th>`).join('')}</tr></thead>
@@ -5329,7 +5370,7 @@ document.addEventListener('keydown', e => {
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;font-size:12px">
         <span class="diag-badge ${activeCamps.length>0?'good':''}">运行中 ${activeCamps.length}</span>
         ${stSum.blacklist_count ? `<span class="diag-badge close">黑名单词 ${stSum.blacklist_count} (浪费 ${fmtMoney(stSum.blacklist_total_waste, cur)})</span>` : ''}
-        ${stSum.winner_count ? `<span class="diag-badge good">黄金词 ${stSum.winner_count}</span>` : ''}
+        ${stWinDisplay.length ? `<span class="diag-badge good" title="${_winnersAiVetted ? `AI 已二次判定，规则候选 ${stSum.winner_count || stWin.length} 个 → AI 真黄金词 ${stWinDisplay.length} 个` : 'AI 未返回判定，显示全部规则候选'}">黄金词 ${stWinDisplay.length}${_winnersAiVetted ? '' : '⚠'}</span>` : ''}
         ${stSum.disaster_count ? `<span class="diag-badge close">重灾区 ${stSum.disaster_count}</span>` : ''}
         ${stSum.competitor_count ? `<span class="diag-badge warn">竞品ASIN截流 ${stSum.competitor_count}</span>` : ''}
       </div>
@@ -5398,32 +5439,63 @@ document.addEventListener('keydown', e => {
           </div>
         </details>` : ''}
 
-      ${stWin.length ? `
+      ${(stWinAll.length === 0) ? `
         <details class="diag-sub" open>
-          <summary>🏆 黄金词 TOP（${stWin.length}）— 应新建手动精准活动收割</summary>
+          <summary>🏆 黄金词 TOP（0）— 规则未筛出候选词</summary>
+          <div class="diag-sub-body">
+            <div style="font-size:12px;color:var(--sub);padding:10px 14px;background:rgba(148,163,184,.06);border-left:3px solid #94a3b8;border-radius:4px;line-height:1.7">
+              📭 <strong>本窗口内没有符合「orders ≥ 1 且 ACOS &lt; 60%」的搜索词</strong>。可能原因：
+              <ul style="margin:6px 0 0 18px;padding:0">
+                <li>广告刚起量 / 该 ASIN 在本窗口内广告投放不足</li>
+                <li>转化的搜索词都被分到了重灾区（ACOS &gt; 100%）—— 看下方"重灾区"段</li>
+                <li>窗口太短（${(data.window||{}).effective_days || 30} 天）—— 试试加长窗口或勾选🔄 强制刷新拉最新数据</li>
+                <li>该产品当前不靠广告自然出单 —— 重点看自然位 + listing 优化</li>
+              </ul>
+            </div>
+          </div>
+        </details>` : ''}
+      ${_aiRejectedAll ? `
+        <details class="diag-sub" open>
+          <summary>🏆 黄金词 TOP（0）· AI 验证 — 规则候选 ${stWinAll.length} 个全部被 AI 判为偶然</summary>
+          <div class="diag-sub-body">
+            <div style="font-size:11px;color:var(--sub);margin-bottom:8px;padding:8px 12px;background:rgba(252,211,77,.08);border-left:3px solid #fcd34d;border-radius:4px;line-height:1.7">
+              ⚠ <strong>AI 二次判定后无真黄金词</strong>。规则筛出 ${stWinAll.length} 个候选（订单≥1 且 ACOS&lt;60%），AI 按语义簇分析后认为：
+              <ul style="margin:6px 0 0 18px;padding:0">
+                <li><strong>${stWinAll.filter(w => w._review && w._review.verdict === 'suspect_coincidence').length}</strong> 个疑似偶然单（孤立词 + 小样本）</li>
+                <li><strong>${stWinAll.filter(w => w._review && w._review.verdict === 'needs_observation').length}</strong> 个需再观察 2 周（边缘信号）</li>
+              </ul>
+              <div style="margin-top:6px;color:var(--sub)">不建议立即新建活动收割。可在 API 响应的 <code>ad_advice.winners_review</code> 字段查看每条候选的判定理由。</div>
+            </div>
+          </div>
+        </details>` : ''}
+      ${stWinDisplay.length ? `
+        <details class="diag-sub" open>
+          <summary>🏆 黄金词 TOP（${stWinDisplay.length}）${_winnersAiVetted ? '· AI 验证' : ''} — 应新建手动精准活动收割</summary>
           <div class="diag-sub-body">
             <div style="font-size:11px;color:var(--sub);margin-bottom:8px;padding:6px 10px;background:rgba(110,231,183,.06);border-left:2px solid #6ee7b7;border-radius:3px;line-height:1.6">
-              判定规则：<strong>多日累计 订单 ≥ 2 且 ACOS &lt; 40%</strong> · 按订单数降序取 Top 20 · 暂停活动里的词<strong>保留</strong>（标 📌 历史验证，建议新建活动收割）
+              ${_winnersAiVetted
+                ? `筛选流程：① 规则筛 <strong>订单 ≥ 1 且 ACOS &lt; 60%</strong>（${stSum.winner_count || stWin.length} 个候选）→ ② <strong>AI 语义簇二次判定</strong>剔除偶然单 / 区分真黄金vs需优化 → <strong>${stWinDisplay.length} 个真黄金词</strong>。暂停活动里的词保留（标 📌 历史验证）。`
+                : `判定规则：<strong>多日累计 订单 ≥ 1 且 ACOS &lt; 60%</strong> · 按订单数降序取 Top 50 · 暂停活动里的词<strong>保留</strong>（标 📌 历史验证）。<br><span style="color:#fcd34d">⚠ 本次 AI 未返回 winners_review，跳过 AI 二次判定，显示规则原始候选</span>`}
             </div>
             <div style="display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-bottom:6px">
               ${copyBtn(
                 `=== 建议新建活动配置（按词组复制到广告后台手动精准活动）===\n\n` +
                 `匹配类型：Exact（精准）\n出价策略：动态出价-仅降低\n首页加成：+50% Top of Search\n\n` +
-                stWin.slice(0,10).map(r =>
+                stWinDisplay.map(r =>
                   `${r.keyword}\t出价 ${cur}${r.suggested_bid != null ? r.suggested_bid : (r.cpc||0)*1.3}\t（当前 CPC ${cur}${r.cpc||'—'}，CVR ${r.cvr}%，订单 ${r.orders}）`
                 ).join('\n'),
-                '📋 复制为新建活动模板'
+                _winnersAiVetted ? `📋 复制全部 ${stWinDisplay.length} 个真黄金词` : `📋 复制全部 ${stWinDisplay.length} 个候选`
               )}
             </div>
             <div style="font-size:11px;color:var(--sub);margin-bottom:8px">操作：复制后到广告后台 → 创建活动 → 手动精准 → 粘贴关键词与建议出价（建议出价 = 当前 CPC × 1.3，抢首页位）</div>
             <div style="font-size:11px;color:var(--sub);margin-bottom:8px;padding:6px 10px;background:rgba(96,165,250,.06);border-left:2px solid #93c5fd;border-radius:3px;line-height:1.6">
-              ℹ <strong>本表都是「我们黄金词」</strong>——来自我们自己搜索词报告里订单≥2 且 ACOS&lt;40% 的已验证词。
+              ℹ <strong>本表都是「我们黄金词」</strong>——${_winnersAiVetted ? '规则筛 + AI 语义簇验证后的真黄金词' : '来自我们自己搜索词报告里订单≥1 且 ACOS&lt;60% 的已验证词'}。
               想看「行业大词 / 竞品自然词」混合的新建活动建议，请下拉到「<strong>AI 建议新建活动</strong>」段，每条词都标了来源 + 选用理由。
             </div>
-            ${stSum.paused_winners_count > 0 ? `<div style="font-size:11px;color:#fcd34d;margin-bottom:8px;padding:6px 10px;background:rgba(245,158,11,.08);border-radius:4px;border-left:3px solid #f59e0b">
-              📌 其中 <strong>${stSum.paused_winners_count}</strong> 个黄金词来自已暂停活动（标记"历史验证"）—— 它们在你产品上有过真实转化，是新建活动收割的最佳候选
+            ${_pausedWinnersInDisplay > 0 ? `<div style="font-size:11px;color:#fcd34d;margin-bottom:8px;padding:6px 10px;background:rgba(245,158,11,.08);border-radius:4px;border-left:3px solid #f59e0b">
+              📌 其中 <strong>${_pausedWinnersInDisplay}</strong> 个真黄金词来自已暂停活动（标记"历史验证"）—— 它们在你产品上有过真实转化，是新建活动收割的最佳候选
             </div>` : ''}
-            ${stTable(stWin.slice(0,10), [
+            ${stTable(stWinDisplay, [
               {h:'搜索词', f:r=>`${esc(r.keyword)}${r.from_paused_campaign?' <span title="该词来自已暂停活动，但历史转化数据有效，建议新建活动收割" style="color:#fcd34d;font-size:10px;cursor:help">📌</span>':''}`},
               {h:'订单', f:r=>esc(r.orders)},
               {h:'点击', f:r=>esc(r.clicks)},
@@ -6451,6 +6523,7 @@ document.addEventListener('keydown', e => {
     // 副标题：广告诊断 / 盈亏分析 / Listing 诊断都基于 effective_days
     const w = data.window || {};
     const days = w.effective_days || 30;
+    const reqDays = w.requested_days || days;
     const offsetDays = (w.data_offset_days != null) ? w.data_offset_days : 3;
     // 反推真实日期范围
     const endDate = new Date(); endDate.setDate(endDate.getDate() - offsetDays);
@@ -6463,10 +6536,40 @@ document.addEventListener('keydown', e => {
     const liveTag = (w.days_since_launch != null)
       ? ` · 上架 ${w.days_since_launch} 天`
       : '';
-    const adSubtitle  = `📅 截止 ${fmtDate(endDate)}（近 ${days} 天）${liveTag}${launchTag}`;
-    const opSubtitle  = `📅 截止 ${fmtDate(endDate)}（近 ${days} 天）`;
+    // 用户请求了更长窗口但产品上架不足时，明确告知"实际只用 N 天"，避免运营困惑
+    const cappedTag = (days < reqDays)
+      ? ` · <span style="color:#f59e0b" title="${esc(w.reason || '')}">⚠ 你选了 ${reqDays} 天但上架仅 ${w.days_since_launch} 天，实际窗口按上架天数封顶</span>`
+      : '';
+    const adSubtitle  = `📅 截止 ${fmtDate(endDate)}（近 ${days} 天）${liveTag}${launchTag}${cappedTag}`;
+    const opSubtitle  = `📅 截止 ${fmtDate(endDate)}（近 ${days} 天）${cappedTag}`;
+
+    // 【数据完整性横幅】积加 / Sorftime 拉取失败时显眼提醒，避免运营把"数据缺失导致的空结论"当真
+    // 后端 main.py 在 Step 3 / Step 6 检测关键 API 失败，挂到 data._data_integrity_issues
+    const _diIssues = (data && data._data_integrity_issues) || [];
+    const _critical = _diIssues.filter(i => i.severity === 'critical');
+    const _high     = _diIssues.filter(i => i.severity === 'high');
+    const _medium   = _diIssues.filter(i => i.severity === 'medium');
+    const _diBannerColor = _critical.length ? '#dc2626' : (_high.length ? '#f59e0b' : '#fbbf24');
+    const _diBannerBg    = _critical.length ? 'rgba(220,38,38,.10)' : (_high.length ? 'rgba(245,158,11,.10)' : 'rgba(251,191,36,.10)');
+    const _diBannerIcon  = _critical.length ? '🚨' : '⚠';
+    const _diBanner = _diIssues.length ? `
+      <div style="margin:10px 0 14px;padding:14px 18px;background:${_diBannerBg};border:1.5px solid ${_diBannerColor};border-radius:8px;line-height:1.7">
+        <div style="font-size:14px;font-weight:700;color:${_diBannerColor};margin-bottom:6px">
+          ${_diBannerIcon} 本次诊断数据不完整 —— ${_critical.length} 个严重失败 / ${_high.length} 个高优先级失败${_medium.length ? ' / '+_medium.length+' 个中等' : ''}
+        </div>
+        <div style="font-size:12px;color:var(--sub);margin-bottom:8px">
+          以下 API 拉取失败（常见原因：积加限流 90008 / Sorftime 60s 超时 / 鉴权失效），导致部分段落得出"无数据"结论可能不真实：
+        </div>
+        <ul style="margin:6px 0 8px 22px;padding:0;font-size:12px;line-height:1.8">
+          ${_diIssues.map(i => `<li><strong style="color:${i.severity==='critical'?'#dc2626':(i.severity==='high'?'#f59e0b':'#fbbf24')}">[${i.severity}]</strong> <code style="font-size:11px">${esc(i.source)}</code>：${esc(i.impact)}</li>`).join('')}
+        </ul>
+        <div style="font-size:12px;color:${_diBannerColor};padding:8px 12px;background:rgba(255,255,255,.04);border-radius:4px;margin-top:8px">
+          💡 <strong>建议</strong>：等 3-5 分钟（避开积加限流恢复期）→ 勾选「🔄 强制刷新」重跑一次。如果反复失败，检查后端日志的限流码 / Sorftime 健康度。
+        </div>
+      </div>` : '';
 
     $('diagReport').innerHTML =
+      _diBanner +
       section('一、产品基础信息', baseHtml) +
       section('二、盈亏分析', costHtml, true, opSubtitle) +
       section('三、Listing 诊断', listingHtml) +
@@ -6481,10 +6584,146 @@ document.addEventListener('keydown', e => {
     _lastReport = { ai, data, asins: getAsins(), market: market, generated_at: new Date().toISOString() };
     const dl = $('diagDownloadBtn');
     if (dl) { dl.disabled = false; dl.style.opacity = '1'; dl.style.cursor = 'pointer'; }
+    // 历史报告持久化：存 localStorage 上限 5 个 FIFO；关浏览器再开还能调出来看
+    // _bpRestoringFromHistory 标志：从历史恢复时 renderReport 也会触发到这里，跳过避免循环存
+    if (!window._bpRestoringFromHistory) {
+      try { window._bpSaveReportHistory(resp); } catch(e) { console.warn('[history] save failed:', e); }
+    }
   }
 
   // ===== 主题 / 字号 =====
   let _lastReport = null;
+
+  // ===== 报告历史（localStorage 上限 5 个 FIFO）=====
+  // 关浏览器再开还能调出来看，避免 5-8 分钟跑完的报告被刷新就丢。
+  // 数据形态：[{ts, asins, marketId, marketName, days, effectiveDays, daysSinceLaunch, includeVariants, resp}]
+  const _BP_HIST_KEY = 'bp_diag_history';
+  const _BP_HIST_MAX = 5;
+
+  function _bpLoadHistory(){
+    try { return JSON.parse(localStorage.getItem(_BP_HIST_KEY) || '[]') || []; }
+    catch { return []; }
+  }
+
+  function _bpFmtTimeAgo(ts){
+    const diff = Date.now() - ts;
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return '刚刚';
+    if (m < 60) return `${m} 分钟前`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h} 小时前`;
+    const d = Math.floor(h / 24);
+    return `${d} 天前`;
+  }
+
+  window._bpSaveReportHistory = function(resp){
+    if (!resp || !resp.data) return;
+    const w = resp.data.window || {};
+    const sel = resp.data.selling || [];
+    const market = resp.data.market || {};
+    const asinList = sel.map(s => s.asin).filter(Boolean);
+    const entry = {
+      ts: Date.now(),
+      asins: asinList,
+      marketId: market.marketId || null,
+      marketName: market.marketName || (market.store && market.country ? `${market.store}:${market.country}` : null),
+      days: w.requested_days || 30,
+      effectiveDays: w.effective_days || 30,
+      daysSinceLaunch: w.days_since_launch,
+      launchMode: !!w.launch_mode,
+      resp,
+    };
+    let list = _bpLoadHistory();
+    list.unshift(entry);
+    list = list.slice(0, _BP_HIST_MAX);
+    try {
+      localStorage.setItem(_BP_HIST_KEY, JSON.stringify(list));
+    } catch(e) {
+      // QuotaExceeded：单条报告可能 200-300KB，5 条 ~1.5MB；超了就只留最新 1 条
+      console.warn('[history] quota exceeded, keeping latest only:', e);
+      try { localStorage.setItem(_BP_HIST_KEY, JSON.stringify([entry])); }
+      catch(e2) { console.warn('[history] still failed:', e2); return; }
+    }
+    _bpRefreshHistoryButton();
+  };
+
+  function _bpRefreshHistoryButton(){
+    const btn = document.getElementById('diagHistoryBtn');
+    if (!btn) return;
+    const list = _bpLoadHistory();
+    btn.style.display = list.length > 0 ? '' : 'none';
+    btn.textContent = `📚 历史 (${list.length})`;
+  }
+
+  function _bpRenderHistoryCards(){
+    const list = _bpLoadHistory();
+    if (list.length === 0) {
+      return '<div style="padding:14px;color:var(--sub);font-size:12px;text-align:center">暂无历史报告</div>';
+    }
+    const escHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    return list.map((e, idx) => {
+      const asinStr = (e.asins || []).slice(0, 3).join(' / ') + ((e.asins||[]).length > 3 ? ` +${e.asins.length-3}` : '');
+      const windowStr = (e.effectiveDays !== e.days)
+        ? `${e.effectiveDays}天(请求${e.days})`
+        : `${e.effectiveDays}天`;
+      const launchTag = e.launchMode ? ' · <span style="color:#f59e0b">🚀新品</span>' : '';
+      return `<div class="diag-history-card" style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .15s" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''" onclick="window._bpRestoreHistory(${idx})" title="点击加载这份报告（不调用 API）">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600;color:var(--text);font-family:'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(asinStr || '—')}</div>
+          <div style="font-size:11px;color:var(--sub);margin-top:2px">${escHtml(e.marketName || ('market ' + (e.marketId||'?')))} · ${windowStr} · ${_bpFmtTimeAgo(e.ts)}${launchTag}</div>
+        </div>
+        <button type="button" onclick="event.stopPropagation();window._bpDeleteHistory(${idx})" title="删除此条" style="background:none;border:none;color:var(--sub);cursor:pointer;font-size:16px;padding:4px 8px;border-radius:4px" onmouseover="this.style.color='#fca5a5';this.style.background='rgba(252,165,165,.1)'" onmouseout="this.style.color='var(--sub)';this.style.background='none'">×</button>
+      </div>`;
+    }).join('') + `<div style="padding:8px 12px;font-size:11px;color:var(--sub);background:var(--surface2);border-top:1px solid var(--border)">仅存浏览器本地，关闭隐私窗口会丢失 · 上限 ${_BP_HIST_MAX} 条 FIFO</div>`;
+  }
+
+  window._bpToggleHistoryPanel = function(){
+    const panel = document.getElementById('diagHistoryPanel');
+    if (!panel) return;
+    if (panel.style.display === 'block') {
+      panel.style.display = 'none';
+    } else {
+      panel.innerHTML = _bpRenderHistoryCards();
+      panel.style.display = 'block';
+    }
+  };
+
+  window._bpRestoreHistory = function(idx){
+    const list = _bpLoadHistory();
+    const entry = list[idx];
+    if (!entry || !entry.resp) return;
+    document.getElementById('diagHistoryPanel').style.display = 'none';
+    // 设标志阻止 renderReport 末尾的 saveHistory 把这份重复存一遍
+    window._bpRestoringFromHistory = true;
+    try { renderReport(entry.resp); }
+    finally { window._bpRestoringFromHistory = false; }
+    const status = document.getElementById('diagStatus');
+    if (status) status.textContent = `已加载历史报告（${_bpFmtTimeAgo(entry.ts)}）`;
+    // 滚动到报告顶部
+    const rpt = document.getElementById('diagReport');
+    if (rpt) rpt.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  window._bpDeleteHistory = function(idx){
+    const list = _bpLoadHistory();
+    list.splice(idx, 1);
+    localStorage.setItem(_BP_HIST_KEY, JSON.stringify(list));
+    _bpRefreshHistoryButton();
+    const panel = document.getElementById('diagHistoryPanel');
+    if (panel && panel.style.display === 'block') panel.innerHTML = _bpRenderHistoryCards();
+  };
+
+  // 点击面板外关闭
+  document.addEventListener('click', e => {
+    const panel = document.getElementById('diagHistoryPanel');
+    const btn = document.getElementById('diagHistoryBtn');
+    if (!panel || panel.style.display !== 'block') return;
+    if (panel.contains(e.target) || (btn && btn.contains(e.target))) return;
+    panel.style.display = 'none';
+  });
+
+  // 启动时检查是否有历史报告，自动显示按钮
+  setTimeout(_bpRefreshHistoryButton, 100);
 
   // 重新解析：用 ai.raw（或用户在 textarea 改过的版本）跑后端 _parse_json，
   // 不调 Claude，零 token 消耗。成功后替换 _lastReport.ai 重新渲染整页。
@@ -6663,8 +6902,10 @@ document.addEventListener('keydown', e => {
     try {
       // 保留原报告的 include_variants 模式：Mode 2 → Mode 2，避免静默退回单变体
       const lastIncludeVariants = !!((_lastReport.data || {}).variant_info || {}).include_variants;
+      // 保留原报告的 days 窗口（用户原来选 60/90 时不能静默退回 30 天，否则数据范围不一致）
+      const lastDays = parseInt((_lastReport.data || {}).requested_days, 10) || 30;
       const resp = await apiPost('/api/diagnose', {
-        asins: lastAsins, marketId: lastMarketId, days: 30,
+        asins: lastAsins, marketId: lastMarketId, days: lastDays,
         seed_keywords: seeds,
         force_refresh: false,  // 数据缓存还能用，只重跑竞品/AI
         include_variants: lastIncludeVariants,
@@ -6879,6 +7120,14 @@ document.addEventListener('keydown', e => {
     if (ai.one_line_summary) lines.push(`- **一句话总结：** ${_md(ai.one_line_summary)}`);
     if (ai.overall_score != null) lines.push(`- **综合评分：** ${_md(ai.overall_score)} / 10`);
     lines.push('');
+    // 数据完整性提醒：Markdown 导出时也保留，否则别人看离线报告会被"无关联活动"等空结论误导
+    const _mdDiIssues = (data && data._data_integrity_issues) || [];
+    if (_mdDiIssues.length) {
+      lines.push(`> ⚠ **本次诊断数据不完整** —— ${_mdDiIssues.length} 个 API 拉取失败，以下段落结论可能不真实：`);
+      _mdDiIssues.forEach(i => lines.push(`> - [${i.severity}] \`${i.source}\`：${i.impact}`));
+      lines.push(`> 建议：等 3-5 分钟后勾选「强制刷新」重跑。`);
+      lines.push('');
+    }
 
     lines.push(`## 一、产品基础信息`);
     lines.push(`- 负责人：${_md(sel.sellingManagerName)}　星级：${_md(sel.averageStar || sel.star)} ⭐　评论：${_md(sel.ratingQuantity || sel.reviewQuantity || 0)} 条　上架日：${_md(sel.firstSalesDate)}`);
@@ -7076,7 +7325,7 @@ document.addEventListener('keydown', e => {
     }
     if ((sa.winners || []).length){
       lines.push('');
-      lines.push(`### 🏆 黄金词 TOP（订单≥2 且 ACOS<40%）`);
+      lines.push(`### 🏆 黄金词 TOP（订单≥1 且 ACOS<60%）`);
       lines.push(`| 搜索词 | 订单 | 点击 | CVR | ACOS | 花费 |`);
       lines.push(`|---|---|---|---|---|---|`);
       sa.winners.slice(0, 10).forEach(t => {
