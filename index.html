@@ -1194,6 +1194,9 @@ details.diag-collapsible:not([open]) .collapse-arrow {
       <option value="ES">🇪🇸 ES</option>
       <option value="US">🇺🇸 US</option>
       <option value="CA">🇨🇦 CA</option>
+      <option value="JP">🇯🇵 JP</option>
+      <option value="AU">🇦🇺 AU</option>
+      <option value="MX">🇲🇽 MX</option>
     </select>
     <input class="asin-input" id="asinInput" placeholder="输入竞品 ASIN 或亚马逊链接，按 Enter 开始分析..." />
     <button class="btn btn-primary" id="analyzeBtn" onclick="startAnalysis()">开始分析</button>
@@ -1273,6 +1276,17 @@ details.diag-collapsible:not([open]) .collapse-arrow {
 
   <!-- Tab 3: 图片生成 -->
   <div class="tab-pane-main" id="pane-images">
+    <!-- 图片工作室入口（amazon-image-studio，部署在后端 /image-studio/）-->
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;margin-bottom:14px;
+                background:linear-gradient(135deg,rgba(99,102,241,.08),rgba(63,185,80,.08));
+                border:1px solid var(--border);border-radius:10px">
+      <span style="font-size:22px">🎨</span>
+      <div style="flex:1">
+        <div style="font-weight:700;font-size:13px">图片工作室（新版）</div>
+        <div style="font-size:11px;color:var(--sub)">专业 Listing 主图 + A+ 生成 · 风格预设 · 信息密度可调 · 服务器统一管理 API Key</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="(function(){var base=((window.DIAG_API_BASE||'').replace(/\/$/,''))+'/image-studio/';var t=(typeof APP_TOKEN!=='undefined'&&APP_TOKEN)?APP_TOKEN:(localStorage.getItem('bp_token')||'');window.open(t?base+'#access='+encodeURIComponent(t):base,'_blank');})()">打开工作室 ↗</button>
+    </div>
     <div class="empty-state" id="imagesEmpty">
       <div class="empty-state-icon">🎨</div>
       <div class="empty-state-title">还没有生成图片</div>
@@ -1471,6 +1485,45 @@ details.diag-collapsible:not([open]) .collapse-arrow {
     <div class="modal-body">
       <div class="notice">⚠️ 提供产品参考图是图生图的关键！AI 会严格保持产品外观，大幅降低产品变形概率。主产品图至少上传1张。</div>
 
+      <!-- 站点 + 类目 -->
+      <div class="form-row" style="display:flex;gap:10px">
+        <div style="flex:1">
+          <div class="form-row-label">📍 站点 <span class="opt-tag">决定语言/字体</span></div>
+          <select id="imageSiteSelect" class="asin-input" style="padding:8px 12px;font-size:12px;width:100%"
+                  onchange="if(document.getElementById('siteSelect'))document.getElementById('siteSelect').value=this.value">
+            <option value="US">🇺🇸 US</option>
+            <option value="CA">🇨🇦 CA</option>
+            <option value="GB">🇬🇧 GB</option>
+            <option value="DE">🇩🇪 DE</option>
+            <option value="FR">🇫🇷 FR</option>
+            <option value="IT">🇮🇹 IT</option>
+            <option value="ES">🇪🇸 ES</option>
+            <option value="JP">🇯🇵 JP</option>
+            <option value="AU">🇦🇺 AU</option>
+            <option value="MX">🇲🇽 MX</option>
+          </select>
+        </div>
+        <div style="flex:1">
+          <div class="form-row-label">📂 产品类目 <span class="opt-tag">影响生图风格</span></div>
+          <select id="categoryPreset" class="asin-input" style="padding:8px 12px;font-size:12px;width:100%">
+            <option value="auto" selected>🪄 自动识别</option>
+            <option value="home">🏠 家具普货</option>
+            <option value="kitchen">🍳 厨房用品</option>
+            <option value="sports">🏃 运动户外</option>
+            <option value="pet">🐾 宠物用品</option>
+            <option value="garden">🌿 园艺庭院</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 品牌名（与 Listing 面板共享） -->
+      <div class="form-row">
+        <div class="form-row-label">🏷️ 品牌名称 <span class="opt-tag">A+ 品牌故事用，自动与 Listing 同步</span></div>
+        <input type="text" id="imageBrandInput" class="asin-input" style="padding:8px 12px;font-size:12px;width:100%"
+               placeholder="例如：BOODPET"
+               oninput="if(document.getElementById('brandInput'))document.getElementById('brandInput').value=this.value">
+      </div>
+
       <!-- 主产品图（复用或重传） -->
       <div class="form-row">
         <div class="form-row-label">📦 主产品参考图 <span class="opt-tag">最少1张，最多5张</span></div>
@@ -1539,17 +1592,36 @@ details.diag-collapsible:not([open]) .collapse-arrow {
       <div class="form-row-label">🏷️ 我们产品名称 <span class="opt-tag">选填，用于生图提示词</span></div>
       <input type="text" id="ourProductName" class="asin-input" style="padding:8px 12px;font-size:12px;width:100%" placeholder="例如：竹制折叠鞋架4层 附赠挂钩 防滑防潮">
     </div>
+
+    <!-- 3 个独立卖点（直接对应 feature_callout 图的文字层；留空时 AI 看图自动生成） -->
+    <div class="form-row">
+      <div class="form-row-label">✨ 核心卖点 <span class="opt-tag">直接出现在卖点图上 · 每条 ≤40 字 · 留空 = AI 看图自动生成</span></div>
+      <input type="text" id="bullet1" class="asin-input" style="padding:7px 12px;font-size:12px;width:100%;margin-bottom:6px" maxlength="40" placeholder="卖点 1，如 Removes Pet Hair Fast">
+      <input type="text" id="bullet2" class="asin-input" style="padding:7px 12px;font-size:12px;width:100%;margin-bottom:6px" maxlength="40" placeholder="卖点 2，如 Gentle on Pet Skin">
+      <input type="text" id="bullet3" class="asin-input" style="padding:7px 12px;font-size:12px;width:100%" maxlength="40" placeholder="卖点 3，如 Machine Washable">
+    </div>
+
       <!-- 额外要求 -->
       <div class="form-row">
         <div class="form-row-label">📝 图片风格 / 特殊要求 <span class="opt-tag">选填</span></div>
         <textarea class="advantage-input" id="imageStyleInput" placeholder="例如：主图背景色要偏向暖色调；需要展示产品尺寸对比；场景要有小孩或宠物互动；A+页面要体现品牌高端感..." style="min-height:60px"></textarea>
       </div>
+
+      <!-- 高级选项（折叠） -->
+      <details class="form-row" style="border:1px solid var(--border);border-radius:6px;padding:8px 12px">
+        <summary style="cursor:pointer;font-size:12px;color:var(--sub);user-select:none;list-style:none">▸ 高级选项</summary>
+        <div style="margin-top:10px">
+          <div class="form-row-label">🚫 避免出现 <span class="opt-tag">作为 AI prompt 的负面约束</span></div>
+          <input type="text" id="imageNegativePrompt" class="asin-input" style="padding:7px 12px;font-size:12px;width:100%" placeholder="例如：不要绿色背景，不要猫薄荷">
+        </div>
+      </details>
+
       <!-- 生图模型选择 -->
       <div class="form-row">
-        <div class="form-row-label">🤖 生图模型 <span class="opt-tag">默认 Gemini</span></div>
+        <div class="form-row-label">🤖 生图模型 <span class="opt-tag">默认 Gemini Pro（快且质量好），急高级感选 GPT</span></div>
         <select id="imageModel" class="asin-input" style="padding:8px 12px;font-size:12px;width:100%">
-          <option value="gemini" selected>Gemini 2.5 Flash Image（默认，速度快）</option>
-          <option value="gpt">GPT Image 2（OpenAI）</option>
+          <option value="gemini" selected>Gemini 3 Pro Image（默认，~21s/张，catalog 风格）</option>
+          <option value="gpt">GPT Image 2（高质量档，~4 分钟/张，更艺术）</option>
         </select>
       </div>
     </div>
@@ -1894,9 +1966,12 @@ function bpLogout() {
 const ANALYSIS_WEBHOOK = 'https://mai-n8n.zeabur.app/webhook/product-analysis-v2';
 const REPORT_WEBHOOK   = 'https://mai-n8n.zeabur.app/webhook/product-analysis-report-v2';
 const LISTING_WEBHOOK  = 'https://mai-n8n.zeabur.app/webhook/generate-listing-v2';
-// const IMAGE_WEBHOOK    = 'https://mai-n8n.zeabur.app/webhook/competitor-ref-image';
-const IMAGE_WEBHOOK         = 'https://mai-n8n.zeabur.app/webhook/ai-image-gen';
-const SINGLE_IMAGE_WEBHOOK  = 'https://mai-n8n.zeabur.app/webhook/ai-image-gen';
+// 生图已迁移到本地 Python 后端（boodpet-diagnosis/app/image_gen），不再走 n8n
+// 通过 DIAG_API_BASE 拼接，让用户在 UI 里配的后端地址自动生效
+function _imageEndpoint(suffix) {
+  const base = (window.DIAG_API_BASE || '').replace(/\/$/, '');
+  return base + '/api/images/' + suffix;
+}
 
 // ===== 防双击锁 =====
 // 用法：if (!acquireLock('name')) return; ... finally { releaseLock('name'); }
@@ -2287,6 +2362,46 @@ function openImagePanel() {
     window.imgAccessoryImgs = [...window.accessoryImgs];
     renderPreviews('imgAccessoryPreviews', 'imgAccessoryImgs');
   }
+
+  // 同步顶部 siteSelect → 面板 imageSiteSelect（让用户看到当前站点）
+  const globalSite = document.getElementById('siteSelect')?.value || 'US';
+  const panelSite = document.getElementById('imageSiteSelect');
+  if (panelSite) panelSite.value = globalSite;
+
+  // 同步 Listing 面板的品牌名 → 生图面板品牌名（避免重复填）
+  const globalBrand = document.getElementById('brandInput')?.value?.trim() || '';
+  const panelBrand = document.getElementById('imageBrandInput');
+  if (panelBrand && !panelBrand.value) panelBrand.value = globalBrand;
+
+  // 自动填充产品名（从诊断结果或上次填的）
+  const ourProductInp = document.getElementById('ourProductName');
+  if (ourProductInp && !ourProductInp.value && currentData?.product_name) {
+    ourProductInp.value = currentData.product_name;
+  }
+
+  // 智能预填 3 个卖点（已填过的不动），来源优先级：
+  // ① 文案生成的结果（lastListingResult.bullet_points——专业五点，取每条开头短语）
+  // ② Listing 面板 advantageInput 的手填文本拆分
+  const bullets = [document.getElementById('bullet1'), document.getElementById('bullet2'), document.getElementById('bullet3')];
+  const anyFilled = bullets.some(el => el && el.value.trim());
+  if (!anyFilled) {
+    let parts = [];
+    const lr = window.lastListingResult;
+    if (lr && Array.isArray(lr.bullet_points) && lr.bullet_points.length) {
+      // 五点通常是 "【短语/KEYWORD PHRASE】: 长说明" 结构——取冒号/破折号前的短语，过长则截断
+      parts = lr.bullet_points.map(b => {
+        const s = String(b || '').trim();
+        const head = s.split(/[:：—-]/)[0].trim();
+        return (head.length >= 8 && head.length <= 40 ? head : s.slice(0, 40)).trim();
+      }).filter(Boolean);
+    }
+    if (!parts.length) {
+      const adv = document.getElementById('advantageInput')?.value || '';
+      if (adv) parts = adv.split(/[，,、;；\n]+/).map(s => s.trim()).filter(Boolean);
+    }
+    bullets.forEach((el, i) => { if (el && parts[i]) el.value = parts[i].slice(0, 40); });
+  }
+
   document.getElementById('imagePanel').classList.add('visible');
 }
 function closeImagePanel() {
@@ -3051,23 +3166,37 @@ async function generateImages() {
   const el = document.getElementById('imageOutput');
   setStatus('<span class="spinner-sm"></span> AI正在策划图片方案...');
 
-  // ===== Step 1: 调 action:"plan" 让 Claude 策划 7 张图方案 =====
+  // ===== Step 1: 调 /api/images/plan 让 Claude 策划 7 张图方案 + style_lock =====
+  // 读三个独立卖点字段；都为空时 backend 会让 Claude 看图自动生成
+  const bullets = [
+    document.getElementById('bullet1')?.value?.trim() || '',
+    document.getElementById('bullet2')?.value?.trim() || '',
+    document.getElementById('bullet3')?.value?.trim() || '',
+  ].filter(b => b);
+  const category = document.getElementById('categoryPreset')?.value || 'auto';
+  const brandName = document.getElementById('imageBrandInput')?.value?.trim()
+                 || document.getElementById('brandInput')?.value?.trim() || '';
+  const negativePrompt = document.getElementById('imageNegativePrompt')?.value?.trim() || '';
+
   let planResp;
   try {
     const planCtrl = new AbortController();
     const planTimer = setTimeout(() => planCtrl.abort(), 180000);
-    const r = await fetch(IMAGE_WEBHOOK, {
+    const r = await fetch(_imageEndpoint('plan'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        action: 'plan',
         productImages: window.imgProductImgs.map(i => i.base64),
         accessoryImages: window.imgAccessoryImgs.map(i => i.base64),
         productName: document.getElementById('ourProductName')?.value?.trim() || currentData?.product_name || '',
-        sellingPoints: document.getElementById('advantageInput')?.value?.trim() || '',
+        brandName: brandName,
+        bulletPoints: bullets,                                  // 结构化 3 卖点
+        sellingPoints: document.getElementById('advantageInput')?.value?.trim() || '',  // 兼容字段
         marketplace: site,
-        style_note: styleNote,
-        analysisData: currentData,
+        category: category,
+        styleNote: styleNote,
+        negativePrompt: negativePrompt,
+        analysisData: currentData || {},   // 没做诊断时给空对象，避免后端 Dict 字段收 null 报 422
         generate_aplus: aplusEnabled,
         aplus_count: aplusCount
       }),
@@ -3116,6 +3245,8 @@ async function generateImages() {
   window._imgPlan = plan;
   if (!window._imgPrompts) window._imgPrompts = {};
   plan.forEach((p, i) => { window._imgPrompts[i] = p.prompt || ''; });
+  // 缓存 style_lock，单张重新生成时保持整套图的视觉一致
+  window._lastStyleLock = planResp.style_lock || null;
 
   // 用 plan 返回的 name 渲染骨架卡片
   el.innerHTML = `
@@ -3149,59 +3280,99 @@ async function generateImages() {
     if (e2) e2.innerHTML = `<span style="font-size:22px">🖼️</span><span style="font-size:11px;color:var(--red);max-width:90%;text-align:center">${msg}</span><button class="regen-btn" onclick="regenWithPrompt(${idx})" style="margin-top:6px">🔄 重新生成</button>`;
   };
 
-  const generateOne = async (task, idx) => {
-    const errEl = document.getElementById(`imgErr_${idx}`);
-    if (errEl) errEl.innerHTML = `<span class="spinner-sm"></span><span style="font-size:12px;color:var(--sub)">生成中...</span>`;
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 240000);
-      const resp = await fetch(IMAGE_WEBHOOK, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'generate',
-          productImages: window.imgProductImgs.map(i => i.base64),
-          prompt: task.prompt,
-          taskId: task.id,
-          taskName: task.name,
-          model: document.getElementById('imageModel')?.value || 'gemini'
-        }),
-        signal: ctrl.signal
-      });
-      clearTimeout(t);
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      const d = safeParseJson(await resp.text());
-      if (d.success && d.imageBase64) {
-        completed++;
-        const card = document.getElementById(`imgCard_${idx}`);
-        if (card) card.outerHTML = buildImgCard({
-          imageBase64: d.imageBase64,
-          taskName: d.taskName || task.name,
-          prompt: d.prompt || task.prompt,
-          modelUsed: d.modelUsed
-        }, idx);
-      } else {
-        failed++;
-        renderError(idx, d.error || '生成失败');
-      }
-    } catch(e) {
-      failed++;
-      renderError(idx, e.name === 'AbortError' ? '生成超时' : (e.message || '生成失败'));
-    } finally {
-      updateProgress();
-    }
-  };
+  // 共享给生图后端：plan 阶段的 style_lock 让所有图保持视觉一致
+  const sharedStyleLock = planResp.style_lock || null;
+  const sharedSite = site;
 
-  // 工作者池：始终保持 IMAGE_CONCURRENCY 个任务在飞，谁先完成就立刻取下一个
-  let nextIdx = 0;
-  async function worker() {
+  // 给每个骨架卡更新状态：等待 → 生成中
+  plan.forEach((_, i) => {
+    const errEl = document.getElementById(`imgErr_${i}`);
+    if (errEl) errEl.innerHTML = `<span class="spinner-sm"></span><span style="font-size:12px;color:var(--sub)">排队生成中...</span>`;
+  });
+
+  // ===== SSE 流式：一次握手发完整 plan，后端推图，前端按到达顺序填卡片 =====
+  // 比之前 7 次握手 + 7 次重传产品图省 70%+ 带宽，且体验更连贯
+  const sseCtrl = new AbortController();
+  // 总超时给得宽：7 张 × 60s + 缓冲 = 8 分钟
+  const sseTimer = setTimeout(() => sseCtrl.abort(), 480000);
+
+  try {
+    const sseResp = await fetch(_imageEndpoint('generate-stream'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body: JSON.stringify({
+        productImages: window.imgProductImgs.map(i => i.base64),
+        accessoryImages: (window.imgAccessoryImgs || []).map(i => i.base64),
+        items: plan,
+        styleLock: sharedStyleLock,
+        model: document.getElementById('imageModel')?.value || 'gemini',
+        marketplace: sharedSite,
+      }),
+      signal: sseCtrl.signal,
+    });
+    if (!sseResp.ok) throw new Error('HTTP ' + sseResp.status);
+
+    const reader = sseResp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
     while (true) {
-      const i = nextIdx++;
-      if (i >= totalCount) return;
-      await generateOne(plan[i], i);
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE 事件以 \n\n 分隔
+      let sep;
+      while ((sep = buffer.indexOf('\n\n')) >= 0) {
+        const raw = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        // ':' 开头是心跳注释，跳过
+        if (raw.startsWith(':')) continue;
+        // 解析 event: X / data: Y 行
+        let eventName = 'message';
+        let dataStr = '';
+        for (const line of raw.split('\n')) {
+          if (line.startsWith('event: ')) eventName = line.slice(7).trim();
+          else if (line.startsWith('data: ')) dataStr += line.slice(6);
+        }
+        if (!dataStr) continue;
+        let d;
+        try { d = JSON.parse(dataStr); } catch { continue; }
+
+        if (eventName === 'start') {
+          // 后端确认开始，可在状态里显示总数
+        } else if (eventName === 'image' && d.success) {
+          completed++;
+          // taskId 是 1-based，前端 idx 是 0-based
+          const idx = (d.taskId || 1) - 1;
+          const card = document.getElementById(`imgCard_${idx}`);
+          if (card) card.outerHTML = buildImgCard({
+            imageBase64: d.imageBase64,
+            taskName: d.taskName || plan[idx]?.name,
+            prompt: d.prompt || plan[idx]?.prompt,
+            modelUsed: d.modelUsed,
+          }, idx);
+          updateProgress();
+        } else if (eventName === 'error' || (eventName === 'image' && !d.success)) {
+          failed++;
+          const idx = (d.taskId || 1) - 1;
+          renderError(idx, d.error || '生成失败');
+          updateProgress();
+        } else if (eventName === 'done') {
+          // 全部结束——主流程从 reader.read() 那里也会收到 done=true
+        }
+      }
     }
+  } catch (e) {
+    // 整个 SSE 连接断了——把未完成的骨架卡标错
+    const finishedTotal = completed + failed;
+    for (let i = finishedTotal; i < totalCount; i++) {
+      renderError(i, e.name === 'AbortError' ? 'SSE 总超时' : ('连接断开: ' + (e.message || e)));
+      failed++;
+    }
+  } finally {
+    clearTimeout(sseTimer);
   }
-  await Promise.all(Array.from({ length: Math.min(IMAGE_CONCURRENCY, totalCount) }, worker));
 
   btn.disabled = false;
   btn.textContent = '🚀 开始生成图片';
@@ -3250,8 +3421,24 @@ function buildImgCard(img, i) {
       <div class="img-card-actions">
         <a onclick="openLightbox('${cardId}')" style="cursor:pointer">🔍 放大</a>
         <a href="${b64}" download="image_${i+1}.jpg">💾 下载</a>
+        <button class="regen-btn" onclick="toggleRefinePanel(${i})">↻ 微调</button>
         <button class="regen-btn" onclick="togglePromptPanel(${i})">✏️ 提示词</button>
         <button class="regen-btn" onclick="regenWithPrompt(${i})">🔄 重新生成</button>
+      </div>
+      <!-- ↻ 微调面板：把当前图作为额外参考，让 AI 在此基础上换角度/换背景/调元素 -->
+      <div class="prompt-panel" id="rp_${i}" style="border-color:var(--accent3)">
+        <div class="prompt-head" style="color:var(--accent3)">↻ 在这张图基础上微调<span style="font-weight:400;color:var(--muted);font-size:10px;margin-left:6px">（描述你想改什么，当前图会作为参考喂给 AI）</span></div>
+        <textarea class="prompt-ta" id="rt_${i}" placeholder="例如：换成俯视角度 / 把背景改成蓝色 / 给狗换成猫 / 文字改成 Premium Quality / 把产品转 30 度"></textarea>
+        <div class="prompt-acts" style="flex-wrap:wrap;gap:6px">
+          <label style="font-size:11px;color:var(--sub);display:inline-flex;align-items:center;gap:4px">
+            🤖 模型
+            <select id="rm_${i}" style="padding:4px 6px;font-size:11px;border-radius:4px;border:1px solid var(--border)">
+              <option value="gemini" ${usedModel === 'gemini' ? 'selected' : ''}>Gemini Pro（快）</option>
+              <option value="gpt" ${usedModel === 'gpt' ? 'selected' : ''}>GPT Image 2（慢/高质）</option>
+            </select>
+          </label>
+          <button class="prompt-go" onclick="applyRefine(${i})">🚀 生成微调版本</button>
+        </div>
       </div>
       <div class="prompt-panel" id="pp_${i}">
         <div class="prompt-head">💡 提示词<span style="font-weight:400;color:var(--muted);font-size:10px;margin-left:6px">（可选，留空将使用默认提示词）</span></div>
@@ -3331,6 +3518,120 @@ function togglePromptPanel(i) {
   if (p) p.classList.toggle('open');
 }
 
+function toggleRefinePanel(i) {
+  const p = document.getElementById('rp_' + i);
+  if (p) {
+    p.classList.toggle('open');
+    if (p.classList.contains('open')) {
+      const ta = document.getElementById('rt_' + i);
+      if (ta) ta.focus();
+    }
+  }
+}
+
+// 多轮 @ 引用微调：把当前卡片的图作为额外参考喂给 AI，
+// + 用户输入的修改描述拼到原 prompt 后面
+async function applyRefine(i) {
+  const taskInst = document.getElementById(`rt_${i}`);
+  const refineText = (taskInst?.value || '').trim();
+  if (!refineText) {
+    taskInst?.focus();
+    if (taskInst) {
+      taskInst.style.borderColor = 'var(--red)';
+      setTimeout(() => { if (taskInst) taskInst.style.borderColor = ''; }, 2000);
+    }
+    return;
+  }
+  // 取卡片当前图（base64 data URL）作为微调参考
+  const card = document.getElementById(`imgCard_${i}`);
+  const imgEl = card?.querySelector('img.img-card-img');
+  const currentB64 = imgEl?.src || '';
+  if (!currentB64.startsWith('data:image')) {
+    alert('当前卡片没有图片可作为微调参考');
+    return;
+  }
+  // 多轮微调：保留原始 prompt 不动，指令按历史累积（后端还原成对话喂给 Gemini）
+  const basePrompt = (window._imgPrompts && window._imgPrompts[i]) || '';
+  if (!window._refineHistory) window._refineHistory = {};
+  if (!window._refineHistory[i]) window._refineHistory[i] = [];
+  const instructions = [...window._refineHistory[i], refineText];
+  const chosenModel = document.getElementById(`rm_${i}`)?.value || 'gemini';
+  const cachedTask = (window._imgPlan && window._imgPlan[i]) || {};
+  const cachedSite = document.getElementById('imageSiteSelect')?.value
+                  || document.getElementById('siteSelect')?.value || 'US';
+
+  // 锁住按钮 + 视觉反馈
+  if (!window._regenLocks) window._regenLocks = {};
+  if (window._regenLocks[i]) return;
+  window._regenLocks[i] = true;
+  if (imgEl) imgEl.style.opacity = '0.35';
+  const errEl = document.getElementById(`imgErr_${i}`);
+  if (errEl) {
+    errEl.style.display = 'flex';
+    errEl.innerHTML = `<span class="spinner-sm"></span><span style="font-size:12px;color:var(--accent3)">微调中...</span>`;
+  }
+
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 300000);
+    // 多轮对话式微调端点：后端把（原始 prompt + 上一轮图 + 指令历史）还原成对话
+    const resp = await fetch(_imageEndpoint('refine'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        currentImage: currentB64,
+        productImages: (window.imgProductImgs || []).slice(0, 5).map(x => x.base64),
+        originalPrompt: basePrompt,
+        instructions: instructions,
+        taskId: i + 1,
+        taskName: (cachedTask.name || `图${i+1}`) + ' (微调)',
+        type: cachedTask.type || 'feature_callout',
+        aspectRatio: cachedTask.aspect_ratio || '1:1',
+        styleLock: window._lastStyleLock || null,
+        model: chosenModel,
+        marketplace: cachedSite,
+      }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const d = safeParseJson(await resp.text());
+    if (d.success && d.imageBase64) {
+      // 用新图替换当前卡片；原始 prompt 保留不动（多轮历史以 instructions 维护）
+      if (card) card.outerHTML = buildImgCard({
+        imageBase64: d.imageBase64,
+        taskName: d.taskName || (cachedTask.name || `图${i+1}`),
+        prompt: basePrompt,
+        modelUsed: d.modelUsed || chosenModel,
+      }, i);
+      // 指令进入历史，下一轮微调自动带上
+      window._refineHistory[i] = instructions;
+      // 清空输入框，方便下一条指令
+      const ta = document.getElementById(`rt_${i}`);
+      if (ta) ta.value = '';
+      showToast(`#${i+1} 微调完成（第 ${instructions.length} 轮）`, '可继续微调或下载', 'success');
+    } else {
+      if (imgEl) imgEl.style.opacity = '1';
+      if (errEl) {
+        errEl.style.display = 'flex';
+        errEl.innerHTML = `<span style="font-size:22px">⚠️</span>
+          <span style="font-size:11px;color:var(--red);max-width:90%;text-align:center">${d.error || '微调失败'}</span>
+          <button class="regen-btn" onclick="toggleRefinePanel(${i})" style="margin-top:6px">↻ 重试</button>`;
+      }
+    }
+  } catch (e) {
+    if (imgEl) imgEl.style.opacity = '1';
+    if (errEl) {
+      errEl.style.display = 'flex';
+      errEl.innerHTML = `<span style="font-size:22px">⚠️</span>
+        <span style="font-size:11px;color:var(--red);max-width:90%;text-align:center">${e.name === 'AbortError' ? '微调超时' : ('失败: ' + e.message)}</span>
+        <button class="regen-btn" onclick="toggleRefinePanel(${i})" style="margin-top:6px">↻ 重试</button>`;
+    }
+  } finally {
+    window._regenLocks[i] = false;
+  }
+}
+
 async function regenWithPrompt(i) {
   const ptEl = document.getElementById(`pt_${i}`);
   // 优先使用用户编辑后的 textarea 内容；textarea 不存在（如失败骨架）时回退到 plan 的原始 prompt
@@ -3368,20 +3669,29 @@ async function regenWithPrompt(i) {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 240000);
-    // 优先使用卡片上的模型选择，回退到全局面板，再回退到 gemini
+    // 优先使用卡片上的模型选择，回退到全局面板，再回退到 gpt（默认主力）
     const chosenModel = document.getElementById(`pm_${i}`)?.value
                      || document.getElementById('imageModel')?.value
-                     || 'gemini';
-    const resp = await fetch(IMAGE_WEBHOOK, {
+                     || 'gpt';
+    // 重新生成时从原 plan 里取 type / aspect / style_lock（如果还在 _imgPlan 缓存里）
+    const cachedTask = (window._imgPlan && window._imgPlan[i]) || {};
+    const cachedStyleLock = window._lastStyleLock || null;
+    const cachedSite = document.getElementById('imageSiteSelect')?.value
+                    || document.getElementById('siteSelect')?.value || 'US';
+    const resp = await fetch(_imageEndpoint('generate'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        action: 'generate',
         productImages: (window.imgProductImgs || []).map(x => x.base64),
         prompt: prompt,
         taskId: i + 1,
         taskName: label,
-        model: chosenModel
+        type: cachedTask.type || 'feature_callout',
+        aspectRatio: cachedTask.aspect_ratio || '1:1',
+        generationMethod: cachedTask.generation_method || 'ai_openai',
+        styleLock: cachedStyleLock,
+        model: chosenModel,
+        marketplace: cachedSite,
       }),
       signal: ctrl.signal
     });
@@ -4160,6 +4470,8 @@ document.addEventListener('keydown', e => {
     return v;
   }
   let DIAG_API_BASE = loadBase();
+  // 同步到 window，让 IIFE 外的代码（如生图模块的 _imageEndpoint）也能读到
+  window.DIAG_API_BASE = DIAG_API_BASE;
 
   function $(id){ return document.getElementById(id); }
   function esc(s){
@@ -4284,6 +4596,7 @@ document.addEventListener('keydown', e => {
     if (!v){ $('diagApiBaseStatus').textContent = '⚠ 不能为空'; return; }
     localStorage.setItem('bp_diag_api_base', v);
     DIAG_API_BASE = v;
+    window.DIAG_API_BASE = v;   // 同步到 window，生图模块的 _imageEndpoint 能立即用上新地址
     $('diagApiBaseStatus').innerHTML = '<span style="color:#3fb950">✓ 已保存</span>';
   };
   window.__testDiagBase = async function(){
