@@ -1307,6 +1307,7 @@ details.diag-collapsible:not([open]) .collapse-arrow {
   <div class="tab-pane-main" id="pane-diagnosis">
     <div class="diag-toolbar">
       <button id="diagDownloadBtn" onclick="window.__downloadDiagReport()" title="导出诊断报告为 Markdown 文件" disabled style="opacity:.5;cursor:not-allowed">📥 下载报告</button>
+      <button id="diagShareBtn" onclick="window.__shareDiagReport(this)" title="复制只读分享链接，发给别人免登录即可查看本报告" disabled style="opacity:.5;cursor:not-allowed">🔗 复制分享链接</button>
     </div>
     <div class="diag-input-card">
       <h4>🔍 产品运营诊断 · 输入 1-4 个同父体 ASIN</h4>
@@ -1364,6 +1365,22 @@ details.diag-collapsible:not([open]) .collapse-arrow {
                placeholder="例：tree trivet, wooden fence, foldable dog pool ——  留空则自动从标题/流量词推断" />
         <div style="font-size:11px;color:var(--sub);margin-top:6px;line-height:1.5">
           💡 <strong>关键词决定竞品准确率</strong>：你最懂产品形态，1 个精准词（如 <code>tree trivet</code> 而非 <code>kitchen decor</code>）能让召回明显更准。留空则系统从标题/流量词自动推断。
+        </div>
+      </div>
+      <!-- 指定竞品 ASIN（可选）—— 填了则强制纳入竞品关键词反查，反查词喂给 AI -->
+      <div style="margin-top:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <label style="font-size:12px;color:var(--text);font-weight:600">
+            🎯 指定竞品 ASIN（可选）
+          </label>
+          <span style="font-size:11px;color:var(--sub)">最多 2 个，一个框填一个</span>
+        </div>
+        <div class="diag-asin-grid" id="diagCompetitorGrid" style="grid-template-columns:repeat(2,1fr)">
+          <input type="text" class="diag-asin-input diag-competitor-asin" placeholder="竞品 ASIN 1（选填）" />
+          <input type="text" class="diag-asin-input diag-competitor-asin" placeholder="竞品 ASIN 2（选填）" />
+        </div>
+        <div style="font-size:11px;color:var(--sub);margin-top:6px;line-height:1.5">
+          💡 填了这里，系统会<strong>强制对这些 ASIN 反查关键词</strong>（和自动挑的精准竞品一起），把查到的「新机会词」喂给 AI 做广告/Listing 建议。最适合你心里已有明确对标对手的场景。
         </div>
       </div>
       <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:center;flex-wrap:wrap;gap:12px">
@@ -1905,6 +1922,42 @@ function _bpHandleDeepLink() {
   } catch(e) { console.warn('[deep-link] handler failed:', e); }
 }
 
+// 只读分享视图：URL 带 ?report=<id> 时，免登录拉取快照并渲染（隐藏所有输入/操作入口）
+async function _bpShowSharedReport(reportId) {
+  window._bpReadOnlyShare = true;
+  const ov = document.getElementById('loginOverlay');
+  if (ov) ov.style.display = 'none';
+  document.documentElement.classList.add('bp-authed');
+  if (typeof switchMainTab === 'function') switchMainTab('diagnosis');
+  // 隐藏输入卡片（ASIN/关键词/竞品/按钮/历史都在里头）+ 分享按钮；下载报告按钮保留
+  const card = document.querySelector('#pane-diagnosis .diag-input-card');
+  if (card) card.style.display = 'none';
+  const sb = document.getElementById('diagShareBtn');
+  if (sb) sb.style.display = 'none';
+  const rep = document.getElementById('diagReport');
+  // 只读提示横幅
+  const banner = document.createElement('div');
+  banner.style.cssText = 'margin:0 0 14px;padding:12px 16px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.45);border-radius:8px;font-size:13px;color:var(--text);line-height:1.6';
+  banner.innerHTML = '🔗 <strong>只读分享视图</strong> —— 这是一份诊断报告快照，无需登录即可查看。数据为报告生成时点的状态，不会自动更新。';
+  if (rep && rep.parentNode) rep.parentNode.insertBefore(banner, rep);
+  if (rep) { rep.classList.add('show'); rep.innerHTML = '<div style="padding:24px;text-align:center;color:var(--sub)">⏳ 正在加载分享报告…</div>'; }
+  try {
+    // 用后端地址拉取：链接通常已指向后端域名（同源），但前端若被跨域托管也能拉到（CORS 已放行 GET）
+    const _base = (window.DIAG_API_BASE || '').replace(/\/$/, '');
+    const res = await fetch(_base + '/api/report/' + encodeURIComponent(reportId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const resp = await res.json();
+    window._bpRestoringFromHistory = true;   // 复用守卫：只读渲染不写本地历史
+    if (typeof window.__diagRender !== 'function') throw new Error('渲染器未就绪');
+    window.__diagRender(resp);
+  } catch (e) {
+    if (rep) {
+      rep.classList.add('show');
+      rep.innerHTML = '<div style="padding:24px;text-align:center;color:var(--sub);line-height:1.8">⚠ 无法加载该分享报告：' + (e.message || e) + '<br>链接可能已失效，或地址输入有误。</div>';
+    }
+  }
+}
+
 function _bpTryLogin() {
   const inp = document.getElementById('pwdInput');
   const errEl = document.getElementById('loginErr');
@@ -1943,6 +1996,9 @@ function bpLogout() {
 // 启动流程：已登录直接显示主界面 + 装 fetch 拦截；未登录绑定登录按钮
 (function _bpInit() {
   const ready = () => {
+    // 优先处理只读分享链接：带 ?report=<id> 时免登录直接渲染快照
+    const _rid = new URLSearchParams(location.search).get('report');
+    if (_rid) { _bpShowSharedReport(_rid); return; }
     const savedToken = localStorage.getItem('bp_token');
     // 已登录 = 有 bp_auth 标志 + localStorage 里存了 token + token 二次哈希校验通过
     if (localStorage.getItem('bp_auth') === '1' && savedToken && _bpSha256Hex(savedToken) === _BP_PWD_HASH_2) {
@@ -4488,7 +4544,9 @@ document.addEventListener('keydown', e => {
     return n.toFixed(1) + '%';
   }
   function getAsins(){
-    return Array.from(document.querySelectorAll('.diag-asin-input'))
+    // 只抓主 ASIN 网格里的输入框；seed 关键词框 / 竞品 ASIN 框虽共用 .diag-asin-input
+    // 样式类，但不是"待诊断 ASIN"，必须排除（否则它们的内容会被当成主 ASIN 去校验）
+    return Array.from(document.querySelectorAll('#diagAsinGrid .diag-asin-input'))
       .map(i => i.value.trim().toUpperCase()).filter(Boolean);
   }
   // 高级筛选 toggle + 首次展开时懒加载店铺/站点选项
@@ -4766,11 +4824,15 @@ document.addEventListener('keydown', e => {
     const seedKeywords = seedRaw
       ? seedRaw.split(/[,，;；\n]+|\s{2,}/).map(s => s.trim()).filter(Boolean).slice(0, 3)
       : [];
+    // 指定竞品 ASIN（可选）：两个独立输入框，各填一个，规范化为大写，最多 2 个
+    const competitorAsins = Array.from(document.querySelectorAll('#diagCompetitorGrid .diag-asin-input'))
+      .map(i => i.value.trim().toUpperCase()).filter(Boolean).slice(0, 2);
     try {
       const data = await apiPost('/api/diagnose', {
         asins, marketId, days: diagDays, force_refresh: forceRefresh,
         include_variants: includeVariants,
         ...(seedKeywords.length ? { seed_keywords: seedKeywords } : {}),
+        ...(competitorAsins.length ? { competitor_asins: competitorAsins } : {}),
       });
       clearInterval(timer);
       const _modeLabel = singleVariantOnly ? ' · 单变体模式' : '';
@@ -6897,6 +6959,13 @@ document.addEventListener('keydown', e => {
     _lastReport = { ai, data, asins: getAsins(), market: market, generated_at: new Date().toISOString() };
     const dl = $('diagDownloadBtn');
     if (dl) { dl.disabled = false; dl.style.opacity = '1'; dl.style.cursor = 'pointer'; }
+    // 分享按钮：仅当后端返回了 report_id（落盘成功）才启用；只读分享视图下不显示（无从再分享）
+    _lastReportId = (resp && resp.report_id) || null;
+    const sb = $('diagShareBtn');
+    if (sb && !window._bpReadOnlyShare) {
+      if (_lastReportId) { sb.disabled = false; sb.style.opacity = '1'; sb.style.cursor = 'pointer'; }
+      else { sb.disabled = true; sb.style.opacity = '.5'; sb.style.cursor = 'not-allowed'; sb.title = '本次报告未能存盘，分享链接不可用'; }
+    }
     // 历史报告持久化：存 localStorage 上限 5 个 FIFO；关浏览器再开还能调出来看
     // _bpRestoringFromHistory 标志：从历史恢复时 renderReport 也会触发到这里，跳过避免循环存
     if (!window._bpRestoringFromHistory) {
@@ -6906,6 +6975,7 @@ document.addEventListener('keydown', e => {
 
   // ===== 主题 / 字号 =====
   let _lastReport = null;
+  let _lastReportId = null;   // 后端返回的分享快照 ID（/?report=<id>）
 
   // ===== 报告历史（localStorage 上限 5 个 FIFO）=====
   // 关浏览器再开还能调出来看，避免 5-8 分钟跑完的报告被刷新就丢。
@@ -8105,6 +8175,23 @@ document.addEventListener('keydown', e => {
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // 复制只读分享链接：指向【后端域名】的 /?report=<id>。后端的 "/" 同时发 index.html
+  // 和 /api/report，对方打开后页面与 API 同源 → 免登录 + 不踩跨域/路径坑。
+  // 不能用 location.origin：前端可能托管在 GitHub Pages（与后端跨域），那样链接会失效。
+  window.__shareDiagReport = async function(btn){
+    if (!_lastReportId){ alert('本次报告未能存盘，分享链接不可用'); return; }
+    const base = (DIAG_API_BASE || location.origin).replace(/\/$/, '');
+    const link = `${base}/?report=${encodeURIComponent(_lastReportId)}`;
+    const _ok = () => { if (btn){ const t = btn.textContent; btn.textContent = '✓ 链接已复制'; setTimeout(()=>{ btn.textContent = t; }, 1800); } };
+    try {
+      await navigator.clipboard.writeText(link);
+      _ok();
+    } catch(e){
+      // 剪贴板 API 不可用（非 https / 老浏览器）→ 兜底用 prompt 让用户手动复制
+      window.prompt('复制下面的分享链接发给别人：', link);
+    }
   };
 
 })();
