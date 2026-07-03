@@ -5182,11 +5182,8 @@ document.addEventListener('keydown', e => {
     };
     const _mainBsr = (data.erp_bsr && data.erp_bsr.leaf) || null;  // fallback
 
-    const _mainStat = (stats.find(x => x.asin === sel.asin) || stats[0] || {});
     const baseHtml = `
       <table class="diag-table">
-        <tr><th>产品名称</th>
-            <td colspan="3" id="diagProductName" data-field="product-name">${esc(_mainStat.productName || '—')}</td></tr>
         <tr><th>负责人</th><td>${esc(sel.sellingManagerName)}</td>
             <th>站点</th><td>${esc(market.marketName)}</td></tr>
         <tr><th>上架日</th><td>${esc(sel.firstSalesDate || '—')}</td>
