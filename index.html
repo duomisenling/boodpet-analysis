@@ -1843,8 +1843,11 @@ function _bpSha256Hex(text) {
   return toHex(h0)+toHex(h1)+toHex(h2)+toHex(h3)+toHex(h4)+toHex(h5)+toHex(h6)+toHex(h7);
 }
 
-// 给所有打到 n8n 的 fetch 自动附加 Authorization 头
+// 给所有需要鉴权的 fetch 自动附加 Authorization 头
 // 并拦截 401/403 → 自动登出（防止 token 失效后用户卡在主界面看不懂错误）
+// 匹配范围：n8n 旧地址 + 自建后端的鉴权路由（/api/analysis/*、/api/listing/*，
+// 后端挂了 require_app_token，token 与 n8n App Token Auth 同值）。
+// 现在这两个 /api 路径没有流量，切换后端时无需再改这里。
 function _bpInstallAuthFetch() {
   if (window._bpFetchPatched) return;
   window._bpFetchPatched = true;
@@ -1852,15 +1855,21 @@ function _bpInstallAuthFetch() {
   window.fetch = function(input, init) {
     init = init || {};
     const url = (typeof input === 'string') ? input : (input && input.url) || '';
-    const isN8n = url.indexOf('mai-n8n.zeabur.app') !== -1;
-    if (isN8n) {
+    // 规则：后端 /api/ 一律带 Bearer（后端已给全部花钱端点挂 require_app_token），
+    // 免登录读取除外（快照 id 本身就是凭证，分享场景对方没有 token）。
+    // 多带 header 对不校验的端点无害，所以宁可范围大——别再回到逐端点枚举，会漏。
+    const isPublicApi = url.indexOf('/api/report/') !== -1
+      || url.indexOf('/api/analysis/snapshot/') !== -1;
+    const needsAuth = url.indexOf('mai-n8n.zeabur.app') !== -1
+      || (url.indexOf('/api/') !== -1 && !isPublicApi);
+    if (needsAuth) {
       const h = new Headers(init.headers || {});
       h.set('Authorization', 'Bearer ' + APP_TOKEN);
       init.headers = h;
     }
     return orig(input, init).then(response => {
       // 后端拒绝认证 → token 失效，强制重新登录
-      if (isN8n && (response.status === 401 || response.status === 403)) {
+      if (needsAuth && (response.status === 401 || response.status === 403)) {
         if (!window._bpReloginShown) {
           window._bpReloginShown = true;
           _bpForceRelogin();
@@ -2019,14 +2028,19 @@ function bpLogout() {
 })();
 
 // ===== CONSTANTS =====
-const ANALYSIS_WEBHOOK = 'https://mai-n8n.zeabur.app/webhook/product-analysis-v2';
-const REPORT_WEBHOOK   = 'https://mai-n8n.zeabur.app/webhook/product-analysis-report-v2';
-const LISTING_WEBHOOK  = 'https://mai-n8n.zeabur.app/webhook/generate-listing-v2';
+// 竞品分析/深度报告/Listing 文案的自建后端已就绪（app/routers/analysis.py、listing.py，
+// 响应契约与 n8n 兼容、Bearer 鉴权已覆盖），但链路未完整验证——本次发布仍指向 n8n。
+// 切换（测好后）：三个函数分别改成
+//   () => _bpEndpoint('/api/analysis/competitor') / ('/api/analysis/report') / ('/api/listing/generate')
+function _bpEndpoint(path) {
+  return (window.DIAG_API_BASE || '').replace(/\/$/, '') + path;
+}
+const ANALYSIS_WEBHOOK = () => 'https://mai-n8n.zeabur.app/webhook/product-analysis-v2';
+const REPORT_WEBHOOK   = () => 'https://mai-n8n.zeabur.app/webhook/product-analysis-report-v2';
+const LISTING_WEBHOOK  = () => 'https://mai-n8n.zeabur.app/webhook/generate-listing-v2';
 // 生图已迁移到本地 Python 后端（boodpet-diagnosis/app/image_gen），不再走 n8n
-// 通过 DIAG_API_BASE 拼接，让用户在 UI 里配的后端地址自动生效
 function _imageEndpoint(suffix) {
-  const base = (window.DIAG_API_BASE || '').replace(/\/$/, '');
-  return base + '/api/images/' + suffix;
+  return _bpEndpoint('/api/images/' + suffix);
 }
 
 // ===== 防双击锁 =====
@@ -2115,7 +2129,7 @@ function releaseLock(name) {
   window._actionLocks[name] = false;
 }
 
-// 带超时的 fetch：n8n 偶尔卡死时让前端能优雅失败而不是无限转圈
+// 带超时的 fetch：后端长任务偶尔卡死时让前端能优雅失败而不是无限转圈
 // AbortError 抛出后由各调用方在 catch 里识别（e.name === 'AbortError'）
 function fetchWithTimeout(url, options, timeoutMs) {
   const ctrl = new AbortController();
@@ -2501,11 +2515,13 @@ function startAnalysis() {
     }
   }, 9000);
 
-  fetchWithTimeout(ANALYSIS_WEBHOOK, {
+  // 600s：Sorftime 六路拉取（category_report 单接口 120s 上限 + 退避重试）+ Claude 8K 输出，
+  // 最坏情况可超 180s。AbortController 是硬中止，心跳字节不会重置计时。
+  fetchWithTimeout(ANALYSIS_WEBHOOK(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url: input, marketplace: site })
-  }, 180000)
+  }, 600000)
   .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
   .then(text => {
     let data;
@@ -2541,7 +2557,7 @@ function startAnalysis() {
     clearInterval(timer);
     document.getElementById('loadingWrap').classList.remove('visible');
     document.getElementById('analyzeBtn').disabled = false;
-    const msg = e.name === 'AbortError' ? '请求超时（180s）：n8n 可能繁忙，请稍后重试' : ('请求失败: ' + e.message);
+    const msg = e.name === 'AbortError' ? '请求超时（600s）：服务可能繁忙，请稍后重试' : ('请求失败: ' + e.message);
     showError(msg);
     showEmptyState('analysis');  // 失败恢复空状态
   })
@@ -2565,11 +2581,12 @@ function generateFullReport() {
       <div style="font-size:12px;color:var(--sub);margin-top:6px">约需 60-90 秒，请稍候...</div>
     </div>`;
 
-  fetchWithTimeout(REPORT_WEBHOOK, {
+  // 600s：报告是 8000-12000 字 Markdown（现 max_tokens=32K），与自建后端心跳流配合别被前端先掐
+  fetchWithTimeout(REPORT_WEBHOOK(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(currentData)
-  }, 180000)
+  }, 600000)
   .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
   .then(text => {
     let data;
@@ -2594,7 +2611,7 @@ function generateFullReport() {
   .catch(e => {
     const c = document.getElementById('fullReportContainer');
     if (!c) return;
-    const msg = e.name === 'AbortError' ? '请求超时（180s）：n8n 可能繁忙，请稍后重试' : e.message;
+    const msg = e.name === 'AbortError' ? '请求超时（600s）：服务可能繁忙，请稍后重试' : e.message;
     c.innerHTML = `
       <div style="text-align:center;padding:48px 20px">
         <div style="font-size:40px;margin-bottom:14px">❌</div>
@@ -2661,11 +2678,12 @@ function generateListing() {
 
   closeListingPanel();
 
-  fetchWithTimeout(LISTING_WEBHOOK, {
+  // 600s：三阶段链路（图析→策划→Opus 成文→可能一次定向修复）可达 2-4 分钟，180s 必超
+  fetchWithTimeout(LISTING_WEBHOOK(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
-  }, 180000)
+  }, 600000)
   .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
   .then(text => { const data = safeParseJson(text);
     btn.disabled = false;
@@ -2683,7 +2701,7 @@ function generateListing() {
   .catch(e => {
     btn.disabled = false;
     btn.textContent = '🚀 开始生成 Listing';
-    const msg = e.name === 'AbortError' ? '请求超时（180s）：n8n 可能繁忙，请稍后重试' : e.message;
+    const msg = e.name === 'AbortError' ? '请求超时（600s）：服务可能繁忙，请稍后重试' : e.message;
     setStatus(`<span style="color:var(--red)">❌ ${opLabel}失败: ${msg}</span>`);
     hideGeneratingState('listing');
     // 失败后恢复空状态，让用户能再点按钮重试
@@ -2776,11 +2794,12 @@ function reviseListing(revisionMode, revisionFeedback) {
     revision_feedback: revisionFeedback
   };
 
-  fetchWithTimeout(LISTING_WEBHOOK, {
+  // 600s：full 重写走完整三阶段链路，与 generateListing 同一口径
+  fetchWithTimeout(LISTING_WEBHOOK(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
-  }, 180000)
+  }, 600000)
   .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
   .then(text => {
     const data = safeParseJson(text);
@@ -2803,7 +2822,7 @@ function reviseListing(revisionMode, revisionFeedback) {
     showToast(`Listing ${modeLabel}完成`, `耗时 ${usedSec}s，新版本已更新到下方`, 'success');
   })
   .catch(e => {
-    const msg = e.name === 'AbortError' ? '请求超时（180s）：n8n 可能繁忙，请稍后重试' : e.message;
+    const msg = e.name === 'AbortError' ? '请求超时（600s）：服务可能繁忙，请稍后重试' : e.message;
     setStatus(`<span style="color:var(--red)">❌ ${modeLabel}失败: ${msg}</span>`);
     restoreUI(`❌ ${modeLabel}失败: ${msg}`, 'error');
     showToast(`${modeLabel}失败`, msg, 'error');
@@ -4629,7 +4648,7 @@ document.addEventListener('keydown', e => {
   }
   function hideProgress(){ $('diagProgress').classList.remove('show'); }
 
-  async function apiPost(path, body){
+  async function apiPost(path, body, onProgress){
     if (!DIAG_API_BASE) throw new Error('后端地址未配置，请在上方"后端地址"填入并点保存');
     const res = await fetch(DIAG_API_BASE + path, {
       method:'POST',
@@ -4637,8 +4656,42 @@ document.addEventListener('keydown', e => {
       body: JSON.stringify(body)
     });
     if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + await res.text());
-    const data = await res.json();
     // /api/diagnose 用心跳流式响应：连接长时不被代理超时关；
+    // body 里可能穿插 {"__progress":"..."} + 换行 的进度行（后端 _stream.py），
+    // 最后一段（无换行结尾）才是真正结果 → 逐行流式读：进度行喂 onProgress，
+    // 其余行/结尾是最终 JSON。不发进度行的端点（reparse 等）自然走结尾解析，兼容。
+    let data;
+    const reader = res.body && res.body.getReader ? res.body.getReader() : null;
+    if (reader) {
+      const dec = new TextDecoder();
+      let buf = '';
+      const eat = (line) => {
+        line = line.trim();
+        if (!line) return;               // 心跳空格
+        let obj = null;
+        try { obj = JSON.parse(line); } catch(_) { return; }
+        if (obj && obj.__progress !== undefined) {
+          if (onProgress) { try { onProgress(String(obj.__progress)); } catch(_){} }
+        } else {
+          data = obj;                    // 理论上最终 payload 不带换行，一般走结尾解析
+        }
+      };
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          eat(buf.slice(0, nl));
+          buf = buf.slice(nl + 1);
+        }
+      }
+      buf += dec.decode();
+      const tail = buf.trim();
+      if (tail) data = JSON.parse(tail);
+    } else {
+      data = await res.json();           // 老浏览器兜底：无 ReadableStream 时整体解析
+    }
     // 流一旦开始就无法改 HTTP status，运行期错误统一在 body 里以 {error:true,...} 返回
     if (data && data.error === true) {
       const e = new Error(data.detail || '诊断失败');
@@ -4793,6 +4846,9 @@ document.addEventListener('keydown', e => {
     setProgress(30, '拉取积加 + Sorftime 数据中…（首次较慢，多接口分页 + 限流排队）');
     const meta = document.getElementById('diagProgressMeta');
     const t0 = Date.now();
+    // 后端实时进度（{"__progress":...} 行）：有真实阶段时优先展示，
+    // 计时器只负责百分比推进和"过久提示"；AI 阶段把 pct 底线抬到 60
+    let liveStage = '';
     const timer = setInterval(()=>{
       const elapsed = Math.floor((Date.now() - t0) / 1000);
       let pct, sub;
@@ -4810,9 +4866,14 @@ document.addEventListener('keydown', e => {
         pct = 90;
         sub = `仍在处理中（${elapsed}s）— 可能是积加接口高并发排队或 AI 仍在生成，请耐心等待`;
       }
+      if (liveStage){
+        sub = `${liveStage}…（${elapsed}s）`;
+        if (liveStage.indexOf('Claude') >= 0) pct = Math.max(pct, 60);
+      }
       setProgress(Math.min(pct, 90), sub);
       if (meta) meta.textContent = `已用 ${elapsed}s / 通常 3-8 分钟（积加限流 1秒/次，多人并发会更久）`;
     }, 1000);
+    const onDiagProgress = (stage) => { liveStage = stage; };
     const forceRefresh = !!($('diagForceRefresh') && $('diagForceRefresh').checked);
     const singleVariantOnly = !!($('diagSingleVariantOnly') && $('diagSingleVariantOnly').checked);
     const includeVariants = !singleVariantOnly;
@@ -4833,7 +4894,7 @@ document.addEventListener('keydown', e => {
         include_variants: includeVariants,
         ...(seedKeywords.length ? { seed_keywords: seedKeywords } : {}),
         ...(competitorAsins.length ? { competitor_asins: competitorAsins } : {}),
-      });
+      }, onDiagProgress);
       clearInterval(timer);
       const _modeLabel = singleVariantOnly ? ' · 单变体模式' : '';
       const _seedLabel = seedKeywords.length ? ` · 用关键词 ${seedKeywords.join('/')}` : '';
@@ -5762,9 +5823,11 @@ document.addEventListener('keydown', e => {
           <table class="diag-table">
             <thead><tr><th>活动</th><th>类型</th><th>花费</th><th>订单</th><th>ACOS</th><th>状态</th><th>建议 & 原因</th></tr></thead>
             <tbody>${activeCamps.map(c => {
-              const tt = c.targetingType;
-              const isManual = tt === 1 || tt === '1' || String(tt).toLowerCase() === 'manual';
-              const isAuto   = tt === 0 || tt === '0' || String(tt).toLowerCase() === 'auto';
+              // 权威口径 = 后端 targetingTypeLabel（积加实测 0=手动 1=自动，与直觉相反，
+              // 别在前端再解读裸数字——旧版就是在这里把 1 当手动导致全部标反）
+              const ttl = c.targetingTypeLabel;
+              const isManual = ttl === '手动';
+              const isAuto   = ttl === '自动';
               const ttypeLabel = isManual?'<span class="diag-badge" style="background:rgba(99,102,241,.15);color:#a5b4fc">手动</span>'
                                 :isAuto?'<span class="diag-badge" style="background:rgba(245,158,11,.15);color:#fcd34d">自动</span>'
                                 :'<span style="color:var(--sub);font-size:11px">—</span>';
