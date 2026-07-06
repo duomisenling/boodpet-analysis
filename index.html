@@ -1225,8 +1225,8 @@ details.diag-collapsible:not([open]) .collapse-arrow {
     <button class="main-tab" data-tab="listing" onclick="switchMainTab('listing')">
       <span class="main-tab-icon">✍️</span>文案生成
     </button>
-    <button class="main-tab" data-tab="images" onclick="switchMainTab('images')">
-      <span class="main-tab-icon">🎨</span>图片生成
+    <button class="main-tab" data-tab="images" onclick="switchMainTab('images')" title="在新窗口打开图片工作台">
+      <span class="main-tab-icon">🎨</span>图片生成 ↗
     </button>
     <button class="main-tab" data-tab="diagnosis" onclick="switchMainTab('diagnosis')">
       <span class="main-tab-icon">🔍</span>产品诊断
@@ -1285,7 +1285,7 @@ details.diag-collapsible:not([open]) .collapse-arrow {
         <div style="font-weight:700;font-size:13px">图片工作室（新版）</div>
         <div style="font-size:11px;color:var(--sub)">专业 Listing 主图 + A+ 生成 · 风格预设 · 信息密度可调 · 服务器统一管理 API Key</div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="(function(){var base=((window.DIAG_API_BASE||'').replace(/\/$/,''))+'/image-studio/';var t=(typeof APP_TOKEN!=='undefined'&&APP_TOKEN)?APP_TOKEN:(localStorage.getItem('bp_token')||'');window.open(t?base+'#access='+encodeURIComponent(t):base,'_blank');})()">打开工作室 ↗</button>
+      <button class="btn btn-primary btn-sm" onclick="openImageStudio()">打开工作室 ↗</button>
     </div>
     <div class="empty-state" id="imagesEmpty">
       <div class="empty-state-icon">🎨</div>
@@ -1845,9 +1845,9 @@ function _bpSha256Hex(text) {
 
 // 给所有需要鉴权的 fetch 自动附加 Authorization 头
 // 并拦截 401/403 → 自动登出（防止 token 失效后用户卡在主界面看不懂错误）
-// 匹配范围：n8n 旧地址 + 自建后端的鉴权路由（/api/analysis/*、/api/listing/*，
-// 后端挂了 require_app_token，token 与 n8n App Token Auth 同值）。
-// 现在这两个 /api 路径没有流量，切换后端时无需再改这里。
+// 匹配范围：n8n 旧地址 + 自建后端全部 /api/ 路径（免登录白名单除外）。
+// 后端已给花钱端点（诊断/detect/reparse/markets/生图 images 等）挂 require_app_token，
+// token 与 n8n App Token Auth 同值；对不校验的端点多带 header 无害。
 function _bpInstallAuthFetch() {
   if (window._bpFetchPatched) return;
   window._bpFetchPatched = true;
@@ -1938,6 +1938,10 @@ async function _bpShowSharedReport(reportId) {
   if (ov) ov.style.display = 'none';
   document.documentElement.classList.add('bp-authed');
   if (typeof switchMainTab === 'function') switchMainTab('diagnosis');
+  // 只读视图锁掉主 Tab 导航：竞品分析/文案/生图是完整功能界面（花钱入口），
+  // 分享链接的观看者未登录，不该看到也不该点得进（2026-07-06 补——此前只藏了输入卡）
+  const tabs = document.querySelector('.main-tabs');
+  if (tabs) tabs.style.display = 'none';
   // 隐藏输入卡片（ASIN/关键词/竞品/按钮/历史都在里头）+ 分享按钮；下载报告按钮保留
   const card = document.querySelector('#pane-diagnosis .diag-input-card');
   if (card) card.style.display = 'none';
@@ -2049,12 +2053,21 @@ function _imageEndpoint(suffix) {
 window._actionLocks = window._actionLocks || {};
 // ===== 主 Tab 切换（竞品分析 / 文案 / 图片，每个独立工作，互不依赖） =====
 function switchMainTab(name) {
+  // 生图已整体迁到图片工作台（2026-07-06 用户拍板砍掉工作台内嵌生图区）：
+  // 点"图片生成"直接新开工作台并带 token 免二次输码，不再切到旧面板
+  if (name === 'images') { openImageStudio(); return; }
   document.querySelectorAll('.main-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-pane-main').forEach(p =>
     p.classList.toggle('active', p.id === 'pane-' + name));
   // 切换时回到页面顶部，避免长内容停留在底部
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+// 打开图片工作台（独立 SPA，部署在后端 /image-studio/），带 token 免二次输码
+function openImageStudio() {
+  const base = ((window.DIAG_API_BASE || '').replace(/\/$/, '')) + '/image-studio/';
+  const t = (typeof APP_TOKEN !== 'undefined' && APP_TOKEN) || localStorage.getItem('bp_token') || '';
+  window.open(t ? base + '#access=' + encodeURIComponent(t) : base, '_blank');
 }
 // 内容已生成 → 隐藏对应 tab 的空状态
 function hideEmptyState(name) {
@@ -5247,7 +5260,7 @@ document.addEventListener('keydown', e => {
     const baseHtml = `
       <table class="diag-table">
         <tr><th>产品名称</th>
-            <td colspan="3" id="diagProductName" data-field="product-name">${esc(_mainStat.productName || '—')}</td></tr>
+            <td colspan="3" id="diagProductName" data-field="product-name">${esc(sel.productName || _mainStat.productName || '—')}</td></tr>
         <tr><th>负责人</th><td>${esc(sel.sellingManagerName)}</td>
             <th>站点</th><td>${esc(market.marketName)}</td></tr>
         <tr><th>上架日</th><td>${esc(sel.firstSalesDate || '—')}</td>
