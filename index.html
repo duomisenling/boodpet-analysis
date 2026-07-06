@@ -6414,6 +6414,7 @@ document.addEventListener('keydown', e => {
             <th style="width:80px">竞品数</th>
             <th style="width:100px">月搜</th>
             <th style="width:140px">竞品最佳排名</th>
+            <th style="width:110px" title="来自 SIF 流量分析：竞品正在给该词投 SP 广告 = 用钱包验证过的词">SIF 信号</th>
             <th>推荐理由</th>
             <th style="width:46px"></th>
           </tr></thead>
@@ -6435,6 +6436,17 @@ document.addEventListener('keydown', e => {
               else if (pg === 1) expColor = '#fcd34d';
               expHtml = `<span style="color:${expColor};font-size:11px;font-weight:600">第${pg}页 · 第${rk}/${tot}位</span>`;
             }
+            // SIF 信号：sp_ad_by=正在给该词投 SP 广告的竞品（钱包投票，最强"值得投"证据）；
+            // traffic_share_max=该词占某竞品流量的最大比例
+            let sifHtml = '<span style="color:var(--muted)">—</span>';
+            const spAds = x.sp_ad_by || [];
+            const ts = x.traffic_share_max;
+            if (spAds.length || (ts != null && ts >= 0.05)) {
+              const bits = [];
+              if (spAds.length) bits.push(`<span style="display:inline-block;padding:1px 6px;background:rgba(249,115,22,.12);color:#fb923c;border-radius:8px;font-size:10px;font-weight:600" title="正在投放该词 SP 广告的竞品：${esc(spAds.join(', '))}">🎯 ${spAds.length} 竞品在投</span>`);
+              if (ts != null && ts >= 0.05) bits.push(`<span style="font-size:10px;color:var(--sub)" title="该词占某竞品总流量的比例（SIF 实测）">占流量 ${(ts * 100).toFixed(0)}%</span>`);
+              sifHtml = bits.join('<br>');
+            }
             const termJson = JSON.stringify(x.term||'').replace(/"/g,'&quot;');
             return `<tr>
               <td><span style="display:inline-block;padding:2px 8px;background:${t.bg};color:${t.color};border-radius:10px;font-size:11px;font-weight:600">${t.label}</span></td>
@@ -6442,6 +6454,7 @@ document.addEventListener('keydown', e => {
               <td style="text-align:center"><strong>${x.occurrences||1}</strong> <span style="font-size:10px;color:var(--sub)" title="${esc((x.sources||[]).join(', '))}">个</span></td>
               <td style="font-family:'JetBrains Mono',monospace">${x.monthly_search!=null ? Number(x.monthly_search).toLocaleString() : '—'}</td>
               <td>${expHtml}</td>
+              <td>${sifHtml}</td>
               <td style="font-size:11px;color:var(--sub);max-width:280px;line-height:1.5">${esc(x.recommend_reason||'')}</td>
               <td><button class="btn btn-ghost btn-xs" style="padding:2px 6px;font-size:11px" onclick="window.__diagCopy(${termJson}, this)" title="复制此关键词">📋</button></td>
             </tr>`;
