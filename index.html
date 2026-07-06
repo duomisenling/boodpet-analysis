@@ -1144,7 +1144,19 @@ details.diag-collapsible:not([open]) .collapse-arrow {
 </head>
 <body>
 <!-- 登录后立即标记 html，避免遮罩闪烁 -->
-<script>if (localStorage.getItem('bp_auth') === '1') document.documentElement.classList.add('bp-authed');</script>
+<script>
+// localStorage 键统一表（全站唯一定义处；BRAND_KEY/_BP_HIST_KEY 在下方引用本表）
+window.BP_LS = {
+  auth: 'bp_auth',            // 登录标记 '1'
+  token: 'bp_token',          // Bearer = sha256(登录密码)
+  diagBase: 'bp_diag_api_base',
+  font: 'bp_diag_font',
+  theme: 'bp_diag_theme',
+  history: 'bp_diag_history', // 最近 5 份完整诊断报告（含经营数据，登出时清）
+  brands: 'boodpet_brands',
+};
+if (localStorage.getItem(BP_LS.auth) === '1') document.documentElement.classList.add('bp-authed');
+</script>
 
 <!-- ===== 登录遮罩 ===== -->
 <div id="loginOverlay" style="position:fixed;inset:0;z-index:10000;background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px">
@@ -1882,8 +1894,8 @@ function _bpInstallAuthFetch() {
 
 // 清登录状态 + 弹回登录页（token 失效或被踢时用）
 function _bpForceRelogin() {
-  localStorage.removeItem('bp_auth');
-  localStorage.removeItem('bp_token');
+  localStorage.removeItem(BP_LS.auth);
+  localStorage.removeItem(BP_LS.token);
   APP_TOKEN = '';
   document.documentElement.classList.remove('bp-authed');
   const ov = document.getElementById('loginOverlay');
@@ -1984,8 +1996,8 @@ function _bpTryLogin() {
     const h2 = _bpSha256Hex(tokenCandidate);
     if (h2 === _BP_PWD_HASH_2) {
       APP_TOKEN = tokenCandidate;                     // 内存里存真 token
-      localStorage.setItem('bp_auth', '1');
-      localStorage.setItem('bp_token', tokenCandidate); // 持久化避免每次重输
+      localStorage.setItem(BP_LS.auth, '1');
+      localStorage.setItem(BP_LS.token, tokenCandidate); // 持久化避免每次重输
       if (errEl) errEl.textContent = '';
       _bpShowApp();
     } else {
@@ -2001,8 +2013,11 @@ function _bpTryLogin() {
 }
 
 function bpLogout() {
-  localStorage.removeItem('bp_auth');
-  localStorage.removeItem('bp_token');
+  localStorage.removeItem(BP_LS.auth);
+  localStorage.removeItem(BP_LS.token);
+  // 主动登出可能是换人/共用电脑：清掉本机报告历史（近 5 份含销量/成本/毛利的完整报告）。
+  // token 失效的 _bpForceRelogin 不清——那是同一个人重新登录
+  localStorage.removeItem(BP_LS.history);
   location.reload();
 }
 
@@ -2012,9 +2027,9 @@ function bpLogout() {
     // 优先处理只读分享链接：带 ?report=<id> 时免登录直接渲染快照
     const _rid = new URLSearchParams(location.search).get('report');
     if (_rid) { _bpShowSharedReport(_rid); return; }
-    const savedToken = localStorage.getItem('bp_token');
+    const savedToken = localStorage.getItem(BP_LS.token);
     // 已登录 = 有 bp_auth 标志 + localStorage 里存了 token + token 二次哈希校验通过
-    if (localStorage.getItem('bp_auth') === '1' && savedToken && _bpSha256Hex(savedToken) === _BP_PWD_HASH_2) {
+    if (localStorage.getItem(BP_LS.auth) === '1' && savedToken && _bpSha256Hex(savedToken) === _BP_PWD_HASH_2) {
       APP_TOKEN = savedToken;
       _bpShowApp();
     } else {
@@ -2032,16 +2047,46 @@ function bpLogout() {
 })();
 
 // ===== CONSTANTS =====
-// 竞品分析/深度报告/Listing 文案的自建后端已就绪（app/routers/analysis.py、listing.py，
-// 响应契约与 n8n 兼容、Bearer 鉴权已覆盖），但链路未完整验证——本次发布仍指向 n8n。
-// 切换（测好后）：三个函数分别改成
-//   () => _bpEndpoint('/api/analysis/competitor') / ('/api/analysis/report') / ('/api/listing/generate')
+// 竞品分析/深度报告/Listing 文案：2026-07-06 已切自建后端（app/routers/analysis.py、listing.py）。
+// n8n 暂不下线；回退 = 三个函数改回旧地址：
+//   https://mai-n8n.zeabur.app/webhook/{product-analysis-v2|product-analysis-report-v2|generate-listing-v2}
+// 注意错误契约差异：自建后端失败也是 HTTP 200、错误在 body（{error:true,detail} 或
+// {status:'error',error:'...'}），各调用点已加显式检查；n8n 是非 200，两种都兼容。
 function _bpEndpoint(path) {
   return (window.DIAG_API_BASE || '').replace(/\/$/, '') + path;
 }
-const ANALYSIS_WEBHOOK = () => 'https://mai-n8n.zeabur.app/webhook/product-analysis-v2';
-const REPORT_WEBHOOK   = () => 'https://mai-n8n.zeabur.app/webhook/product-analysis-report-v2';
-const LISTING_WEBHOOK  = () => 'https://mai-n8n.zeabur.app/webhook/generate-listing-v2';
+// 读心跳流响应：{"__progress":...} 行喂 onProgress，返回最终 payload 文本。
+// 协议同 apiPost（app/routers/_stream.py）：进度行独立成行、payload 是最后一段无换行内容
+async function _bpReadHeartbeat(response, onProgress) {
+  if (!response.body || !response.body.getReader) return response.text();
+  const reader = response.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '', linePayload = '';
+  const eat = (line) => {
+    line = line.trim();
+    if (!line) return;   // 心跳空格
+    try {
+      const o = JSON.parse(line);
+      if (o && o.__progress !== undefined) {
+        if (onProgress) { try { onProgress(String(o.__progress)); } catch(_){} }
+        return;
+      }
+    } catch(_) {}
+    linePayload = line;  // 理论上 payload 无换行走不到这，兜底
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) { eat(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
+  }
+  buf += dec.decode();
+  return buf.trim() || linePayload;
+}
+const ANALYSIS_WEBHOOK = () => _bpEndpoint('/api/analysis/competitor');
+const REPORT_WEBHOOK   = () => _bpEndpoint('/api/analysis/report');
+const LISTING_WEBHOOK  = () => _bpEndpoint('/api/listing/generate');
 // 生图已迁移到本地 Python 后端（boodpet-diagnosis/app/image_gen），不再走 n8n
 function _imageEndpoint(suffix) {
   return _bpEndpoint('/api/images/' + suffix);
@@ -2066,7 +2111,7 @@ function switchMainTab(name) {
 // 打开图片工作台（独立 SPA，部署在后端 /image-studio/），带 token 免二次输码
 function openImageStudio() {
   const base = ((window.DIAG_API_BASE || '').replace(/\/$/, '')) + '/image-studio/';
-  const t = (typeof APP_TOKEN !== 'undefined' && APP_TOKEN) || localStorage.getItem('bp_token') || '';
+  const t = (typeof APP_TOKEN !== 'undefined' && APP_TOKEN) || localStorage.getItem(BP_LS.token) || '';
   window.open(t ? base + '#access=' + encodeURIComponent(t) : base, '_blank');
 }
 // 内容已生成 → 隐藏对应 tab 的空状态
@@ -2249,7 +2294,7 @@ function safeParseJson(text) {
   }
 }
 // ===== BRAND NAME HELPERS (localStorage) =====
-const BRAND_KEY = 'boodpet_brands';
+const BRAND_KEY = BP_LS.brands;
 
 function getBrands() {
   try { return JSON.parse(localStorage.getItem(BRAND_KEY) || '[]'); } catch(e) { return []; }
@@ -2520,13 +2565,22 @@ function startAnalysis() {
   const steps = document.querySelectorAll('.loading-steps .step');
   steps.forEach(s => { s.classList.remove('done'); s.querySelector('.step-icon').textContent = '⏳'; });
   let si = 0;
-  const timer = setInterval(() => {
+  // 推进一步；label 非空时把真实阶段文案写到当前步（真实进度带 label，假定时器不带）
+  const advanceStep = (label) => {
     if (si < steps.length - 1) {
       steps[si].classList.add('done');
       steps[si].querySelector('.step-icon').textContent = '✅';
       si++;
     }
-  }, 9000);
+    if (label && steps[si]) steps[si].innerHTML = '<span class="step-icon">⏳</span>' + label;
+  };
+  // 9s 假定时器只是兜底：首个真实进度行到达即停（避免假进度抢跑真进度）
+  const timer = setInterval(advanceStep, 9000);
+  let sawRealProgress = false;
+  const onStage = (label) => {
+    if (!sawRealProgress) { sawRealProgress = true; clearInterval(timer); }
+    advanceStep(label);
+  };
 
   // 600s：Sorftime 六路拉取（category_report 单接口 120s 上限 + 退避重试）+ Claude 8K 输出，
   // 最坏情况可超 180s。AbortController 是硬中止，心跳字节不会重置计时。
@@ -2535,26 +2589,23 @@ function startAnalysis() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url: input, marketplace: site })
   }, 600000)
-  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return _bpReadHeartbeat(r, onStage); })
   .then(text => {
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch(e) {
-      // 清理弯引号和特殊字符后重试
-      const cleaned = text
-        .replace(/\u201c|\u201d/g, '"')
-        .replace(/\u2018|\u2019/g, "'")
-        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
-        .replace(/,(\s*[}\]])/g, '$1');
-      try { data = JSON.parse(cleaned); } catch(e2) { throw new Error('JSON parse failed: ' + e2.message); }
-    }
+    // n8n 回退期仍需容错解析（LLM 直出文本）；自建后端是服务端序列化、走不进兜底
+    const data = safeParseJson(text);
     clearInterval(timer);
     steps.forEach(s => { s.classList.add('done'); s.querySelector('.step-icon').textContent = '✅'; });
     setTimeout(() => {
       document.getElementById('loadingWrap').classList.remove('visible');
       document.getElementById('analyzeBtn').disabled = false;
       const d = Array.isArray(data) ? data[0] : data;
+      // 自建后端错误契约：HTTP 200 + body 报错（{error:true,detail} / {status:'error',error}）。
+      // 业务错误体也带 asin 字段——必须先判错误，否则会被下面的成功分支当结果渲染
+      if (d && (d.error === true || d.status === 'error')) {
+        showError(d.detail || (typeof d.error === 'string' ? d.error : '分析失败，请稍后重试'));
+        showEmptyState('analysis');
+        return;
+      }
       if (d.status === 'success' || d.product_name || d.asin) {
         currentData = d;
         renderResults(d);
@@ -2602,18 +2653,9 @@ function generateFullReport() {
   }, 600000)
   .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
   .then(text => {
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch(e) {
-      const cleaned = text
-        .replace(/\u201c|\u201d/g, '"')
-        .replace(/\u2018|\u2019/g, "'")
-        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
-        .replace(/,(\s*[}\]])/g, '$1');
-      try { data = JSON.parse(cleaned); } catch(e2) { throw new Error('JSON parse failed: ' + e2.message); }
-    }
+    const data = safeParseJson(text);
     const d = Array.isArray(data) ? data[0] : data;
+    if (d && (d.error === true || d.status === 'error')) throw new Error(d.detail || '报告生成失败，请稍后重试');
     const report = d && d.full_report ? d.full_report : '';
     if (!report) throw new Error('响应中未返回 full_report 字段');
 
@@ -2643,7 +2685,7 @@ function generateListing() {
     document.getElementById('brandInput').focus();
     document.getElementById('brandInput').style.borderColor = 'var(--red)';
     setTimeout(() => document.getElementById('brandInput').style.borderColor = '', 2000);
-    alert('请输入品牌名称！');
+    showToast('请输入品牌名称', 'Listing 生成需要品牌名（会写进标题首位）', 'error');
     return;
   }
   // 防双击 + 互斥：和 reviseListing 共用同一把锁，确保两者不会并发
@@ -2699,6 +2741,9 @@ function generateListing() {
   }, 600000)
   .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
   .then(text => { const data = safeParseJson(text);
+    { const _d0 = Array.isArray(data) ? data[0] : data;
+      if (_d0 && (_d0.error === true || _d0.status === 'error'))
+        throw new Error(_d0.detail || _d0.error || '生成失败，请稍后重试'); }
     btn.disabled = false;
     btn.textContent = '🚀 开始生成 Listing';
     setStatus(`<span style="color:var(--green)">✅ Listing ${opLabel}完成</span>`);
@@ -2817,6 +2862,8 @@ function reviseListing(revisionMode, revisionFeedback) {
   .then(text => {
     const data = safeParseJson(text);
     const d = Array.isArray(data) ? data[0] : data;
+    if (d && (d.error === true || d.status === 'error'))
+      throw new Error(d.detail || d.error || '改写失败，请稍后重试');
     window.lastListingResult = d;
     window.reviseFields = {};  // 提交成功后清空标记
     pushListingHistory(d, revisionMode, revisionFeedback);
@@ -2848,7 +2895,7 @@ function submitPartialRevise() {
   const keys = ['title','bullet_1','bullet_2','bullet_3','bullet_4','bullet_5','description','search_terms'];
   const marked = keys.filter(k => window.reviseFields[k] && window.reviseFields[k].revise);
   if (marked.length === 0) {
-    alert('请先点击某个字段右侧的 ✏️ 标记修改 按钮，填写修改意见。');
+    showToast('还没有标记任何修改', '先点击字段右侧的 ✏️ 按钮并填写修改意见，再提交局部改写', 'error');
     return;
   }
   const feedback = {};
@@ -2865,7 +2912,7 @@ function submitPartialRevise() {
 // 设置 intent 标志，generateListing 提交时会带上 revision_mode='full' + previous_result
 function submitFullRewrite() {
   if (window._actionLocks && window._actionLocks.listingOp) {
-    alert('正在生成中，请等待当前任务完成');
+    showToast('正在生成中', '请等待当前任务完成后再全部重写', 'info');
     return;
   }
   window._listingFullRewriteIntent = true;
@@ -2902,7 +2949,7 @@ function saveReviseField(fieldKey) {
   const ta = document.getElementById('rt_' + fieldKey);
   const note = (ta?.value || '').trim();
   if (!note) {
-    alert('请填写修改意见再保存');
+    showToast('修改意见不能为空', '写一句想怎么改（如"突出 45cm 长柄"），AI 按它改这个字段', 'error');
     if (ta) ta.focus();
     return;
   }
@@ -4551,7 +4598,7 @@ document.addEventListener('keydown', e => {
   }
   function loadBase(){
     let v = window.DIAG_API_BASE
-        || localStorage.getItem('bp_diag_api_base')
+        || localStorage.getItem(BP_LS.diagBase)
         || defaultBase();
     // 自动把 //localhost: 替换为 //127.0.0.1:，避免 Windows IPv6 解析问题
     if (v) v = v.replace(/\/\/localhost(?=[:/])/, '//127.0.0.1');
@@ -4669,42 +4716,10 @@ document.addEventListener('keydown', e => {
       body: JSON.stringify(body)
     });
     if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + await res.text());
-    // /api/diagnose 用心跳流式响应：连接长时不被代理超时关；
-    // body 里可能穿插 {"__progress":"..."} + 换行 的进度行（后端 _stream.py），
-    // 最后一段（无换行结尾）才是真正结果 → 逐行流式读：进度行喂 onProgress，
-    // 其余行/结尾是最终 JSON。不发进度行的端点（reparse 等）自然走结尾解析，兼容。
-    let data;
-    const reader = res.body && res.body.getReader ? res.body.getReader() : null;
-    if (reader) {
-      const dec = new TextDecoder();
-      let buf = '';
-      const eat = (line) => {
-        line = line.trim();
-        if (!line) return;               // 心跳空格
-        let obj = null;
-        try { obj = JSON.parse(line); } catch(_) { return; }
-        if (obj && obj.__progress !== undefined) {
-          if (onProgress) { try { onProgress(String(obj.__progress)); } catch(_){} }
-        } else {
-          data = obj;                    // 理论上最终 payload 不带换行，一般走结尾解析
-        }
-      };
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let nl;
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          eat(buf.slice(0, nl));
-          buf = buf.slice(nl + 1);
-        }
-      }
-      buf += dec.decode();
-      const tail = buf.trim();
-      if (tail) data = JSON.parse(tail);
-    } else {
-      data = await res.json();           // 老浏览器兜底：无 ReadableStream 时整体解析
-    }
+    // 心跳流式响应：进度行喂 onProgress、尾段是最终 JSON——
+    // 传输层读取统一复用 _bpReadHeartbeat（协议唯一实现，勿再内嵌手写读取器）
+    const text = await _bpReadHeartbeat(res, onProgress);
+    const data = text ? JSON.parse(text) : undefined;
     // 流一旦开始就无法改 HTTP status，运行期错误统一在 body 里以 {error:true,...} 返回
     if (data && data.error === true) {
       const e = new Error(data.detail || '诊断失败');
@@ -4718,7 +4733,7 @@ document.addEventListener('keydown', e => {
   window.__saveDiagBase = function(){
     const v = $('diagApiBaseInput').value.trim().replace(/\/$/, '');
     if (!v){ $('diagApiBaseStatus').textContent = '⚠ 不能为空'; return; }
-    localStorage.setItem('bp_diag_api_base', v);
+    localStorage.setItem(BP_LS.diagBase, v);
     DIAG_API_BASE = v;
     window.DIAG_API_BASE = v;   // 同步到 window，生图模块的 _imageEndpoint 能立即用上新地址
     $('diagApiBaseStatus').innerHTML = '<span style="color:#3fb950">✓ 已保存</span>';
@@ -7072,7 +7087,7 @@ document.addEventListener('keydown', e => {
   // ===== 报告历史（localStorage 上限 5 个 FIFO）=====
   // 关浏览器再开还能调出来看，避免 5-8 分钟跑完的报告被刷新就丢。
   // 数据形态：[{ts, asins, marketId, marketName, days, effectiveDays, daysSinceLaunch, includeVariants, resp}]
-  const _BP_HIST_KEY = 'bp_diag_history';
+  const _BP_HIST_KEY = BP_LS.history;
   const _BP_HIST_MAX = 5;
 
   function _bpLoadHistory(){
@@ -7421,22 +7436,22 @@ document.addEventListener('keydown', e => {
     if (btn) btn.textContent = (size === 'lg') ? '🔠 大字号' : '🔠 标准';
   }
   window.__toggleDiagTheme = function(){
-    const cur = localStorage.getItem('bp_diag_theme') === 'light' ? 'light' : 'dark';
+    const cur = localStorage.getItem(BP_LS.theme) === 'light' ? 'light' : 'dark';
     const next = cur === 'light' ? 'dark' : 'light';
-    localStorage.setItem('bp_diag_theme', next);
+    localStorage.setItem(BP_LS.theme, next);
     _applyTheme(next);
   };
   window.__toggleDiagFont = function(){
-    const cur = localStorage.getItem('bp_diag_font') === 'lg' ? 'lg' : 'std';
+    const cur = localStorage.getItem(BP_LS.font) === 'lg' ? 'lg' : 'std';
     const next = cur === 'lg' ? 'std' : 'lg';
-    localStorage.setItem('bp_diag_font', next);
+    localStorage.setItem(BP_LS.font, next);
     _applyFont(next);
   };
 
   // 启动时回填偏好
   function _initDiagPrefs(){
-    _applyTheme(localStorage.getItem('bp_diag_theme') === 'light' ? 'light' : 'dark');
-    _applyFont(localStorage.getItem('bp_diag_font') === 'lg' ? 'lg' : 'std');
+    _applyTheme(localStorage.getItem(BP_LS.theme) === 'light' ? 'light' : 'dark');
+    _applyFont(localStorage.getItem(BP_LS.font) === 'lg' ? 'lg' : 'std');
   }
   if (document.readyState === 'loading'){
     document.addEventListener('DOMContentLoaded', _initDiagPrefs);
