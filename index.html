@@ -1800,7 +1800,7 @@ if (localStorage.getItem(BP_LS.auth) === '1') document.documentElement.classList
 // 源码里只存"双哈希"：sha256(sha256(password))
 // Bearer Token 是 sha256(password)，仅在用户输入正确密码后才能算出来
 // 这样攻击者扒源码看到的 hash 无法直接用来调 n8n
-const _BP_PWD_HASH_2 = 'a93c5e7492b4fda2dd815c6d1330561fc75c1ad066b0d1fe190e88423ea98710';
+const _BP_PWD_HASH_2 = 'cd5950c8632dac06721b4b0b714bd9351902bce76d0ddd76cd5882df2774d268';
 let APP_TOKEN = '';  // 登录成功后填充；初始为空，未登录时 fetch 不会附带有效 token
 
 // 纯 JS SHA-256（不依赖 crypto.subtle，局域网 HTTP 也能跑）
@@ -2036,6 +2036,15 @@ function bpLogout() {
       APP_TOKEN = savedToken;
       _bpShowApp();
     } else {
+      // token 校验不过（最常见：管理员改了密码，本机存的还是旧 token）。
+      // 必须显式把遮罩放回来——body 顶部那句"防闪烁"只看 bp_auth 标记就 add 了 bp-authed，
+      // 不撤掉的话用户会看到主界面却没有 token，每个请求 401，像是"密码没改成功"。
+      localStorage.removeItem(BP_LS.auth);
+      localStorage.removeItem(BP_LS.token);
+      APP_TOKEN = '';
+      document.documentElement.classList.remove('bp-authed');
+      const ov = document.getElementById('loginOverlay');
+      if (ov) ov.style.display = 'flex';
       const btn = document.getElementById('pwdBtn');
       const inp = document.getElementById('pwdInput');
       if (btn) btn.addEventListener('click', _bpTryLogin);
