@@ -1379,20 +1379,23 @@ if (localStorage.getItem(BP_LS.auth) === '1') document.documentElement.classList
           💡 <strong>关键词决定竞品准确率</strong>：你最懂产品形态，1 个精准词（如 <code>tree trivet</code> 而非 <code>kitchen decor</code>）能让召回明显更准。留空则系统从标题/流量词自动推断。
         </div>
       </div>
-      <!-- 指定竞品 ASIN（可选）—— 填了则强制纳入竞品关键词反查，反查词喂给 AI -->
+      <!-- 指定竞品 ASIN（可选）—— 用于扩词找更多竞品；新品无类目时也用于类目推断 -->
       <div style="margin-top:14px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <label style="font-size:12px;color:var(--text);font-weight:600">
             🎯 指定竞品 ASIN（可选）
           </label>
-          <span style="font-size:11px;color:var(--sub)">最多 2 个，一个框填一个</span>
+          <span style="font-size:11px;color:var(--sub)">最多 5 个，一个框填一个</span>
         </div>
-        <div class="diag-asin-grid" id="diagCompetitorGrid" style="grid-template-columns:repeat(2,1fr)">
+        <div class="diag-asin-grid" id="diagCompetitorGrid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
           <input type="text" class="diag-asin-input diag-competitor-asin" placeholder="竞品 ASIN 1（选填）" />
           <input type="text" class="diag-asin-input diag-competitor-asin" placeholder="竞品 ASIN 2（选填）" />
+          <input type="text" class="diag-asin-input diag-competitor-asin" placeholder="竞品 ASIN 3（选填）" />
+          <input type="text" class="diag-asin-input diag-competitor-asin" placeholder="竞品 ASIN 4（选填）" />
+          <input type="text" class="diag-asin-input diag-competitor-asin" placeholder="竞品 ASIN 5（选填）" />
         </div>
         <div style="font-size:11px;color:var(--sub);margin-top:6px;line-height:1.5">
-          💡 填了这里，系统会<strong>强制对这些 ASIN 反查关键词</strong>（和自动挑的精准竞品一起），把查到的「新机会词」喂给 AI 做广告/Listing 建议。最适合你心里已有明确对标对手的场景。
+          💡 填了这里，系统会<strong>反查竞品关键词并继续搜索更多同款</strong>；新品自身没有类目时，还会用这些竞品的类目投票补齐类目大盘、热词和季节性。人工竞品优先于自动竞品。
         </div>
       </div>
       <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:center;flex-wrap:wrap;gap:12px">
@@ -2892,7 +2895,7 @@ function reviseListing(revisionMode, revisionFeedback) {
 
 // 收集已标记的字段，构造 partial 提交的 revision_feedback
 function submitPartialRevise() {
-  const keys = ['title','bullet_1','bullet_2','bullet_3','bullet_4','bullet_5','description','search_terms'];
+  const keys = ['title','item_highlights','bullet_1','bullet_2','bullet_3','bullet_4','bullet_5','description','search_terms'];
   const marked = keys.filter(k => window.reviseFields[k] && window.reviseFields[k].revise);
   if (marked.length === 0) {
     showToast('还没有标记任何修改', '先点击字段右侧的 ✏️ 按钮并填写修改意见，再提交局部改写', 'error');
@@ -2969,7 +2972,7 @@ function cancelReviseField(fieldKey) {
 
 // 根据 window.reviseFields 更新每个字段的视觉标记 + 底部计数 + 按钮可用性
 function refreshReviseUI() {
-  const keys = ['title','bullet_1','bullet_2','bullet_3','bullet_4','bullet_5','description','search_terms'];
+  const keys = ['title','item_highlights','bullet_1','bullet_2','bullet_3','bullet_4','bullet_5','description','search_terms'];
   let markedCount = 0;
   keys.forEach(k => {
     const wrap = document.getElementById('rw_' + k);
@@ -2992,15 +2995,39 @@ function renderListing(d) {
   hideEmptyState('listing');
   const el = document.getElementById('listingOutput');
   const title = d.title || '';
+  const itemHighlights = d.item_highlights || '';
   const bullets = Array.isArray(d.bullet_points) ? d.bullet_points : [];
   const desc = d.description || d.product_description || '';
+  const descPlainText = _stripHtmlToText(desc);
   const searchTerms = d.search_terms || d.backend_keywords || '';
   const subject = Array.isArray(d.subject_matter) ? d.subject_matter.join('\n') : (d.subject_matter || '');
   const reasons = d.reasons || {};
   const kwsUsed = d.keywords_used || [];
 
   // 暂存干净源数据给复制函数用（避免从 DOM innerText 抓到 B1~B5 标号和"✏️ 修改"按钮文字）
-  window.currentListing = { title, bullets, desc, searchTerms, subject };
+  window.currentListing = { title, itemHighlights, bullets, desc, searchTerms, subject };
+
+  const validation = d.validation && typeof d.validation === 'object' ? d.validation : null;
+  const textChars = value => Array.from(value || '').length;
+  const fieldBadge = (check, fallbackChars, max, unit) => {
+    const chars = Number.isFinite(check?.chars) ? check.chars : fallbackChars;
+    const ok = typeof check?.in_range === 'boolean' ? check.in_range : chars > 0 && chars <= max;
+    const issues = Array.isArray(check?.banned_hits) ? check.banned_hits : [];
+    const pass = ok && issues.length === 0;
+    const detail = issues.length ? ` · ${issues.join('；')}` : '';
+    return `<span title="${escHtml(issues.join('；'))}" style="margin-left:8px;font-size:10px;font-weight:600;color:${pass ? 'var(--green)' : 'var(--red)'}">${pass ? '✓' : '⚠'} ${chars}/${max} ${unit}${escHtml(detail)}</span>`;
+  };
+  const validationAllPass = !!(
+    validation?.all_pass
+    && textChars(title) > 0 && textChars(title) <= 75
+    && textChars(itemHighlights) > 0 && textChars(itemHighlights) <= 125
+  );
+  const validationSummary = validation ? `
+    <div style="margin:0 0 14px;padding:9px 11px;border:1px solid ${validationAllPass ? 'rgba(63,185,80,.35)' : 'rgba(248,81,73,.35)'};border-radius:8px;background:${validationAllPass ? 'rgba(63,185,80,.07)' : 'rgba(248,81,73,.07)'};font-size:11px;line-height:1.6;color:var(--sub)">
+      <b style="color:${validationAllPass ? 'var(--green)' : 'var(--red)'}">${validationAllPass ? '✓ 2026 Listing 规则检查通过' : '⚠ 仍有字段未通过规则检查'}</b>
+      ${validation.repaired ? ' · 已执行一次定向修复' : ''}
+      ${Number.isFinite(validation.keyword_coverage) ? ` · 相关关键词覆盖 ${(validation.keyword_coverage * 100).toFixed(0)}%（质量参考，不作为合规硬门槛）` : ''}
+    </div>` : '';
 
   // 关键词高亮：把文本中出现的关键词用颜色标注
   // 用单次 OR-regex 替换，避免先前生成的 <span class="kw-hl-..."> 标签里
@@ -3044,6 +3071,14 @@ function renderListing(d) {
           title: '算法适配说明',
           body: null,
           algo: true
+        }
+      ];
+    } else if (type === 'item_highlights') {
+      sections = [
+        {
+          icon: '✨',
+          title: 'Item Highlights 布局逻辑',
+          body: rawReason
         }
       ];
     } else if (type === 'bullets') {
@@ -3145,11 +3180,20 @@ function renderListing(d) {
   // 标题字段
   const titleHtml = title ? `
     <div class="listing-field" id="rw_title">
-      <div class="lf-label">📌 TITLE（标题）</div>
+      <div class="lf-label">📌 TITLE（标题）${fieldBadge(validation?.title, textChars(title), 75, '字符')}</div>
       <div class="lf-content" id="listingTitle" style="line-height:1.8">${highlightKws(title, kwsUsed)}<button class="btn-revise" id="rb_title" onclick="openReviseField('title')">✏️ 修改</button><button class="copy-btn" onclick="copyField('listingTitle')">复制</button></div>
       ${buildReviseUI('title')}
       ${buildReasonHtml(reasons.title, 'title')}
     </div>` : '';
+
+  // 2026-07-27 新字段：承接从 75 字符短标题中移出的材质和用途信息
+  const itemHighlightsHtml = `
+    <div class="listing-field" id="rw_item_highlights">
+      <div class="lf-label">✨ ITEM HIGHLIGHTS（商品亮点）${fieldBadge(validation?.item_highlights, textChars(itemHighlights), 125, '字符')}</div>
+      <div class="lf-content" id="listingItemHighlights" style="line-height:1.8">${itemHighlights ? highlightKws(itemHighlights, kwsUsed) : '<span style="color:var(--muted)">旧版本未生成，可标记修改或全部重写后补充</span>'}<button class="btn-revise" id="rb_item_highlights" onclick="openReviseField('item_highlights')">✏️ 修改</button><button class="copy-btn" onclick="copyField('listingItemHighlights')">复制</button></div>
+      ${buildReviseUI('item_highlights', '例如：保留材质、适用场景或关键规格，最多 125 字符')}
+      ${buildReasonHtml(reasons.item_highlights, 'item_highlights')}
+    </div>`;
 
   // 五行描述（每行独立可修改）
   const bulletsHtml = bullets.length ? `
@@ -3161,7 +3205,7 @@ function renderListing(d) {
             const text = typeof b === 'string' ? b : (b.text || JSON.stringify(b));
             const k = 'bullet_' + (i+1);
             return `<li id="rw_${k}" class="bullet-li">
-              <span class="mono" style="color:var(--accent);font-size:10px;margin-right:6px">B${i+1}</span>${highlightKws(text, kwsUsed)}
+              <span class="mono" style="color:var(--accent);font-size:10px;margin-right:6px">B${i+1}</span>${highlightKws(text, kwsUsed)}${fieldBadge(validation?.bullets?.[i], textChars(text), 255, '字符')}
               <button class="btn-revise" id="rb_${k}" onclick="openReviseField('${k}')">✏️ 修改</button>
               ${buildReviseUI(k, '例如：要强调材质 / 换个角度突出 ...')}
             </li>`;
@@ -3175,17 +3219,17 @@ function renderListing(d) {
   // 搜索词字段
   const searchHtml = searchTerms ? `
     <div class="listing-field" id="rw_search_terms">
-      <div class="lf-label">🔍 SEARCH TERMS（后台搜索词）</div>
+      <div class="lf-label">🔍 SEARCH TERMS（后台搜索词）${fieldBadge(validation?.search_terms, new TextEncoder().encode(searchTerms).length, 249, '字节')}</div>
       <div class="lf-content" id="listingSearch">${highlightKws(searchTerms, kwsUsed)}<button class="btn-revise" id="rb_search_terms" onclick="openReviseField('search_terms')">✏️ 修改</button><button class="copy-btn" onclick="copyField('listingSearch')">复制</button></div>
       ${buildReviseUI('search_terms', '例如：补充长尾词 / 删掉某些词 ...')}
       ${buildReasonHtml(reasons.search_terms, 'search_terms')}
     </div>` : '';
 
   // 产品描述
-  const descHtml = desc ? `
+  const descHtml = descPlainText ? `
     <div class="listing-field" id="rw_description">
-      <div class="lf-label">📝 DESCRIPTION（产品描述）</div>
-      <div class="lf-content" id="listingDesc" style="white-space:normal">${desc}<button class="btn-revise" id="rb_description" onclick="openReviseField('description')">✏️ 修改</button><button class="copy-btn" onclick="copyField('listingDesc')">复制</button></div>
+      <div class="lf-label">📝 DESCRIPTION（产品描述）${fieldBadge(validation?.description, textChars(descPlainText), 2000, '字符')}</div>
+      <div class="lf-content" id="listingDesc" style="white-space:normal">${escHtml(descPlainText).replace(/\n/g, '<br>')}<button class="btn-revise" id="rb_description" onclick="openReviseField('description')">✏️ 修改</button><button class="copy-btn" onclick="copyField('listingDesc')">复制</button></div>
       ${buildReviseUI('description', '例如：开头要更有冲击力 / 加 FAQ 段 ...')}
       ${buildReasonHtml(reasons.description, 'description')}
     </div>` : '';
@@ -3250,7 +3294,9 @@ function renderListing(d) {
       </div>
       ${histPanel}
       <div class="listing-body" id="listingBody">
+        ${validationSummary}
         ${titleHtml}
+        ${itemHighlightsHtml}
         ${kwChips}
         ${bulletsHtml}
         ${descHtml}
@@ -4410,6 +4456,7 @@ function _listingFieldText(id) {
   if (!src) return null;
   switch (id) {
     case 'listingTitle':   return src.title || '';
+    case 'listingItemHighlights': return src.itemHighlights || '';
     case 'listingBullets': return (src.bullets || []).map(b => typeof b === 'string' ? b : (b.text || '')).join('\n');
     case 'listingSearch':  return src.searchTerms || '';
     case 'listingDesc':    return _stripHtmlToText(src.desc);
@@ -4437,6 +4484,7 @@ function copyAllListing() {
   if (!src) return;
   const parts = [];
   if (src.title)        parts.push('📌 TITLE（标题）\n' + src.title);
+  if (src.itemHighlights) parts.push('✨ ITEM HIGHLIGHTS（商品亮点）\n' + src.itemHighlights);
   if (src.bullets && src.bullets.length) {
     const bulletText = src.bullets.map(b => typeof b === 'string' ? b : (b.text || '')).join('\n');
     parts.push('🔹 BULLET POINTS（五行描述）\n' + bulletText);
@@ -4913,9 +4961,9 @@ document.addEventListener('keydown', e => {
     const seedKeywords = seedRaw
       ? seedRaw.split(/[,，;；\n]+|\s{2,}/).map(s => s.trim()).filter(Boolean).slice(0, 3)
       : [];
-    // 指定竞品 ASIN（可选）：两个独立输入框，各填一个，规范化为大写，最多 2 个
+    // 指定竞品 ASIN（可选）：各填一个，规范化为大写，最多 5 个
     const competitorAsins = Array.from(document.querySelectorAll('#diagCompetitorGrid .diag-asin-input'))
-      .map(i => i.value.trim().toUpperCase()).filter(Boolean).slice(0, 2);
+      .map(i => i.value.trim().toUpperCase()).filter(Boolean).slice(0, 5);
     try {
       const data = await apiPost('/api/diagnose', {
         asins, marketId, days: diagDays, force_refresh: forceRefresh,
@@ -6313,6 +6361,7 @@ document.addEventListener('keydown', e => {
     // 新版用积加 sellersRankList（亚马逊页面权威）作真实类目；
     // 精准池 sub_cat 分布只作"赛道分布"参考，不再翻盘亚马逊真实分类。
     const catMis = data.category_mismatch || {};
+    const catInference = data.category_inference || catMis.category_inference || {};
     const erpBsr = data.erp_bsr || null;
     const erpLeaf = (erpBsr && erpBsr.leaf) || null;
     const erpTop  = (erpBsr && erpBsr.top)  || null;
@@ -6320,11 +6369,13 @@ document.addEventListener('keydown', e => {
       ? '积加 sellersRankList（亚马逊页面权威）'
       : catMis.source === 'sorftime'
       ? 'Sorftime 详情解析（次要，ERP 无数据时兜底）'
+      : catMis.source === 'competitor_inferred'
+      ? `竞品类目推断（${catInference.support_count||0}/${catInference.evidence_total||0} 票，置信度 ${Math.round((catInference.confidence||0)*100)}%）`
       : '（无数据源）';
-    const catInfoPanel = (erpLeaf || catMis.main_asin_sub_cat) ? `
+    const catInfoPanel = (erpLeaf || catMis.main_asin_sub_cat || catMis.main_asin_node_id) ? `
       <div style="margin-bottom:14px;padding:12px 14px;background:rgba(110,231,183,.06);border:1px solid rgba(110,231,183,.30);border-radius:8px">
         <div style="font-size:12px;font-weight:700;margin-bottom:6px">
-          📂 亚马逊真实类目
+          📂 ${catMis.source === 'competitor_inferred' ? '新品推断类目' : '亚马逊真实类目'}
           <span style="font-size:10px;font-weight:400;color:var(--sub);margin-left:6px">数据源：${_srcLabel}</span>
         </div>
         <div style="font-size:12px;line-height:1.75;color:var(--text)">
@@ -6341,6 +6392,7 @@ document.addEventListener('keydown', e => {
               ${catMis.main_asin_node_id ? `<code style="font-size:10px;margin-left:8px;color:var(--sub)">node ${catMis.main_asin_node_id}</code>` : ''}
             </div>
             ${catMis.main_asin_main_cat ? `<div>大类：${esc(catMis.main_asin_main_cat)}</div>` : ''}
+            ${catMis.source === 'competitor_inferred' && (catInference.evidence||[]).length ? `<div style="margin-top:5px;color:var(--sub);font-size:11px">支持该类目的竞品：${catInference.evidence.filter(e=>String(e.node_id)===String(catInference.node_id)).map(e=>`<code style="font-size:10px">${esc(e.asin)}</code>`).join('、')}</div>` : ''}
           `}
           ${(catMis.evidence_top3||[]).length ? `
             <div style="margin-top:6px;padding-top:6px;border-top:1px dashed rgba(110,231,183,.25);font-size:11px;color:var(--sub)">
@@ -6397,10 +6449,13 @@ document.addEventListener('keydown', e => {
       ${(() => {
         // 显示本次实际用了什么关键词搜竞品 + 给修改入口的引导
         const searchUsed = ckwMeta.search_queries_used || [];
-        const _isUser = ckwQuerySource === 'user_seed';
+        const _isUser = ckwQuerySource === 'user_seed' || ckwQuerySource === 'user_seed+competitor_asin';
         const _isAutoTraffic = ckwQuerySource === 'auto_traffic';
         const _isAutoFeature = ckwQuerySource === 'auto_feature';
-        const sourceLabel = _isUser ? '你手动指定' : (_isAutoTraffic ? '从亚马逊流量词自动推断' : (_isAutoFeature ? '从标题自动抽特征词' : '自动推断'));
+        const _hasCompAsinWords = ckwQuerySource === 'competitor_asin_keywords' || ckwQuerySource === 'user_seed+competitor_asin';
+        const sourceLabel = _hasCompAsinWords
+          ? (ckwQuerySource === 'user_seed+competitor_asin' ? '手动关键词 + 竞品 ASIN 反查词' : '竞品 ASIN 反查词扩搜')
+          : (_isUser ? '你手动指定' : (_isAutoTraffic ? '从亚马逊流量词自动推断' : (_isAutoFeature ? '从标题自动抽特征词' : '自动推断')));
         const sourceIcon = _isUser ? '✦' : '⚙';
         const sourceColor = _isUser ? '#a5b4fc' : '#fbbf24';
         const sourceBg = _isUser ? 'rgba(165,180,252,.10)' : 'rgba(251,191,36,.08)';
@@ -7394,9 +7449,12 @@ document.addEventListener('keydown', e => {
       const lastIncludeVariants = !!((_lastReport.data || {}).variant_info || {}).include_variants;
       // 保留原报告的 days 窗口（用户原来选 60/90 时不能静默退回 30 天，否则数据范围不一致）
       const lastDays = parseInt((_lastReport.data || {}).requested_days, 10) || 30;
+      // 保留人工竞品：否则“用新关键词重找”会静默丢掉类目推断与竞品扩词的依据。
+      const lastCompetitorAsins = (((_lastReport.data || {}).competitor_keywords_pool_meta || {}).user_competitor_asins || []).slice(0, 5);
       const resp = await apiPost('/api/diagnose', {
         asins: lastAsins, marketId: lastMarketId, days: lastDays,
         seed_keywords: seeds,
+        ...(lastCompetitorAsins.length ? { competitor_asins: lastCompetitorAsins } : {}),
         force_refresh: false,  // 数据缓存还能用，只重跑竞品/AI
         include_variants: lastIncludeVariants,
       });
