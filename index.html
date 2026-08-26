@@ -1400,6 +1400,9 @@ if (localStorage.getItem(BP_LS.auth) === '1') document.documentElement.classList
       </div>
       <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);display:flex;align-items:center;flex-wrap:wrap;gap:12px">
         <button class="diag-go-btn" id="diagGoBtn" onclick="startDiagnosis()">开始诊断</button>
+        <button class="diag-go-btn" id="diagAdPlanBtn" onclick="startAdPlan()"
+                style="background:linear-gradient(135deg,#f59e0b,#d97706)"
+                title="只跑广告方案：跳过 listing 文案评分、用户评论 VOC、季节性分析&#10;省一半 AI 成本，输出的活动/否定词结构与完整诊断完全一致&#10;刚跑过诊断的 ASIN 会命中缓存，几十秒就能出">⚡ 只出广告方案</button>
         <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);cursor:pointer"
                title="数据拉取窗口（积加广告/搜索词/listing/库存）&#10;30 天：默认，最快，适合多数日常诊断&#10;60/90 天：成熟品趋势更稳，长尾词样本更全，但数据量大可能多耗 30s-2min&#10;新品（上架<14天）此设置无效 —— 自动用全生命周期窗口">
           📅 数据范围
@@ -3018,24 +3021,38 @@ function renderListing(d) {
 
   const validation = d.validation && typeof d.validation === 'object' ? d.validation : null;
   const textChars = value => Array.from(value || '').length;
-  const fieldBadge = (check, fallbackChars, max, unit) => {
+  // optional=true 的字段（目前只有 Item Highlights）空着不算违规：
+  // 它是 2026-07-27 新增的**可选**字段，存量 listing 大多是空的。判红会让老 listing
+  // 走「部分改写」时永久红标 —— 而定向修复在部分改写模式下不跑，运营怎么改都消不掉。
+  // 空着的正确表达是「机会」（黄字：还能多占 125 字符搜索位），不是「错误」。
+  const fieldBadge = (check, fallbackChars, max, unit, optional) => {
     const chars = Number.isFinite(check?.chars) ? check.chars : fallbackChars;
-    const ok = typeof check?.in_range === 'boolean' ? check.in_range : chars > 0 && chars <= max;
     const issues = Array.isArray(check?.banned_hits) ? check.banned_hits : [];
+    if (optional && chars === 0) {
+      return `<span title="可选字段，填上能多占 ${max} ${unit}可搜索位" style="margin-left:8px;font-size:10px;font-weight:600;color:#d29922">○ 未填写 · 可补 ${max} ${unit}</span>`;
+    }
+    const ok = typeof check?.in_range === 'boolean' ? check.in_range : chars > 0 && chars <= max;
     const pass = ok && issues.length === 0;
     const detail = issues.length ? ` · ${issues.join('；')}` : '';
     return `<span title="${escHtml(issues.join('；'))}" style="margin-left:8px;font-size:10px;font-weight:600;color:${pass ? 'var(--green)' : 'var(--red)'}">${pass ? '✓' : '⚠'} ${chars}/${max} ${unit}${escHtml(detail)}</span>`;
   };
+  // 商品亮点空着不参与合规判定（与后端 validate.check 同口径）；填了才卡 125 字符
+  const _ihChars = textChars(itemHighlights);
   const validationAllPass = !!(
     validation?.all_pass
     && textChars(title) > 0 && textChars(title) <= 75
-    && textChars(itemHighlights) > 0 && textChars(itemHighlights) <= 125
+    && (_ihChars === 0 || _ihChars <= 125)
   );
+  // 后端给的 item_highlights_missing 优先；老报告没这个字段时按字符数兜底
+  const _ihMissing = typeof validation?.item_highlights_missing === 'boolean'
+    ? validation.item_highlights_missing
+    : _ihChars === 0;
   const validationSummary = validation ? `
     <div style="margin:0 0 14px;padding:9px 11px;border:1px solid ${validationAllPass ? 'rgba(63,185,80,.35)' : 'rgba(248,81,73,.35)'};border-radius:8px;background:${validationAllPass ? 'rgba(63,185,80,.07)' : 'rgba(248,81,73,.07)'};font-size:11px;line-height:1.6;color:var(--sub)">
       <b style="color:${validationAllPass ? 'var(--green)' : 'var(--red)'}">${validationAllPass ? '✓ 2026 Listing 规则检查通过' : '⚠ 仍有字段未通过规则检查'}</b>
       ${validation.repaired ? ' · 已执行一次定向修复' : ''}
       ${Number.isFinite(validation.keyword_coverage) ? ` · 相关关键词覆盖 ${(validation.keyword_coverage * 100).toFixed(0)}%（质量参考，不作为合规硬门槛）` : ''}
+      ${_ihMissing ? `<div style="margin-top:5px;color:#d29922">○ 商品亮点未填写 —— 这是 2026 新增的可选字段（不影响合规），填上可多占 125 字符可搜索位，建议补</div>` : ''}
     </div>` : '';
 
   // 关键词高亮：把文本中出现的关键词用颜色标注
@@ -3198,7 +3215,7 @@ function renderListing(d) {
   // 2026-07-27 新字段：承接从 75 字符短标题中移出的材质和用途信息
   const itemHighlightsHtml = `
     <div class="listing-field" id="rw_item_highlights">
-      <div class="lf-label">✨ ITEM HIGHLIGHTS（商品亮点）${fieldBadge(validation?.item_highlights, textChars(itemHighlights), 125, '字符')}</div>
+      <div class="lf-label">✨ ITEM HIGHLIGHTS（商品亮点）${fieldBadge(validation?.item_highlights, textChars(itemHighlights), 125, '字符', true)}</div>
       <div class="lf-content" id="listingItemHighlights" style="line-height:1.8">${itemHighlights ? highlightKws(itemHighlights, kwsUsed) : '<span style="color:var(--muted)">旧版本未生成，可标记修改或全部重写后补充</span>'}<button class="btn-revise" id="rb_item_highlights" onclick="openReviseField('item_highlights')">✏️ 修改</button><button class="copy-btn" onclick="copyField('listingItemHighlights')">复制</button></div>
       ${buildReviseUI('item_highlights', '例如：保留材质、适用场景或关键规格，最多 125 字符')}
       ${buildReasonHtml(reasons.item_highlights, 'item_highlights')}
@@ -4823,11 +4840,40 @@ document.addEventListener('keydown', e => {
     initDiagBaseInput();
   }
 
-  async function startDiagnosis(){
-    // 防双击：诊断要跑 3-5 分钟 + 调一次后端 = 一份钱，快速点两下不能触发两次
-    const __btn = $('diagGoBtn');
-    if (__btn.dataset.busy === '1') return;
-    __btn.dataset.busy = '1';
+  // 本轮跑的是完整诊断还是只出广告方案。两者共用同一套输入校验/站点检测/渲染，
+  // 只在最后调哪个端点、以及渲染时隐藏哪些空 section 上分叉。
+  //
+  // profile 一路走**参数**，不放模块级变量：站点检测是 await，期间用户完全可能去点
+  // 另一个按钮，全局变量会被后点的那次覆盖，让已经在飞的请求改道——广告方案变成
+  // 完整诊断，用户白掏一份钱且毫无提示。
+
+  // ===== 付费请求的唯一一把锁 =====
+  // 「有没有请求在飞」是全局状态（跟 profile 那种每次点击各不相同的值不一样），
+  // 必须放模块级。此前它散在 diagGoBtn.dataset.busy 和各处 disabled 里各管各的，
+  // 结果多站点路径上：picker 确认后先恢复按钮、再 await 三五分钟的诊断，而
+  // startDiagnosis 的 finally 早就把 busy 清了 —— 整个运行期间两个付费按钮都能点。
+  let _diagRunning = false;
+
+  function _setEntryButtonsEnabled(enabled){
+    [$('diagGoBtn'), $('diagAdPlanBtn')].forEach(b => {
+      if (!b) return;
+      b.disabled = !enabled;
+      b.style.opacity = enabled ? '' : '.55';
+      b.style.cursor = enabled ? '' : 'not-allowed';
+    });
+  }
+  function _setEntryButtonsVisible(visible){
+    [$('diagGoBtn'), $('diagAdPlanBtn')].forEach(b => {
+      if (b) b.style.display = visible ? '' : 'none';
+    });
+  }
+
+  async function startDiagnosis(profile){
+    const _profile = (profile === 'ads') ? 'ads' : 'full';
+    // 防双击 + 防两个入口并发：诊断要跑 3-5 分钟且每次都花钱
+    if (_diagRunning) return;
+    _diagRunning = true;
+    _setEntryButtonsEnabled(false);
     try {
     const asins = getAsins();
     // 清除上一轮的红色高亮
@@ -4875,26 +4921,31 @@ document.addEventListener('keydown', e => {
       }
       let marketId = det.selectedMarketId;
       if (!det.autoSelect){
-        // 多站点：让用户选；隐藏"开始诊断"按钮避免误点（选完后会自动恢复）
+        // 多站点：让用户选；两个入口按钮都要藏（选完/取消后一起恢复）。
+        // picker 是内联 div 不是模态框，只藏 diagGoBtn 的话「⚡ 只出广告方案」会
+        // 悬在打开的选择器上方还能点 —— 正是隐藏 diagGoBtn 想防的那次重复付费。
         hideProgress();
-        $('diagGoBtn').style.display = 'none';
-        renderMarketPicker(det.markets, asins);
+        _setEntryButtonsVisible(false);
+        // profile 必须带进 picker：否则多站点场景下用户选完站点会跑成完整诊断
+        renderMarketPicker(det.markets, asins, _profile);
+        // 这里没有请求在飞（等用户选站点），锁要放掉 —— 真正的诊断在
+        // __confirmMarket 里重新上锁，锁的粒度对齐「有没有花钱的请求在跑」
         return;
       }
-      await runDiagnose(asins, marketId);
+      await runDiagnose(asins, marketId, _profile);
     } catch(e){
       hideProgress();
       setStatus('错误：' + e.message, 'error');
-    } finally {
-      $('diagGoBtn').disabled = false;
     }
     } finally {
-      __btn.dataset.busy = '';
+      _diagRunning = false;
+      _setEntryButtonsEnabled(true);
     }
   }
   window.startDiagnosis = startDiagnosis;
+  window.startAdPlan = () => startDiagnosis('ads');
 
-  function renderMarketPicker(markets, asins){
+  function renderMarketPicker(markets, asins, profile){
     const list = $('diagMarketList');
     list.innerHTML = markets.map((m,i) =>
       `<label><input type="radio" name="diagMarket" value="${m.marketId}" ${i===0?'checked':''}/>
@@ -4908,20 +4959,33 @@ document.addEventListener('keydown', e => {
     $('diagMarketPicker').classList.add('show');
     setStatus('已检测到多个站点，请选择');
     window.__confirmMarket = async function(){
+      if (_diagRunning) return;
       const picked = document.querySelector('input[name=diagMarket]:checked');
       if (!picked) return;
       $('diagMarketPicker').classList.remove('show');
-      $('diagGoBtn').style.display = '';   // 恢复主按钮
-      await runDiagnose(asins, +picked.value);
+      // 按钮恢复显示，但**在整轮诊断跑完之前保持禁用**。
+      // 之前是先恢复可点、再 await 三五分钟，等于把防重复付费的门开着跑。
+      _setEntryButtonsVisible(true);
+      _diagRunning = true;
+      _setEntryButtonsEnabled(false);
+      try {
+        // profile 从闭包拿（不是全局）：这个 picker 是哪次点击弹出来的，就跑哪种
+        await runDiagnose(asins, +picked.value, profile);
+      } finally {
+        _diagRunning = false;
+        _setEntryButtonsEnabled(true);
+      }
     };
     window.__cancelMarketPicker = function(){
       $('diagMarketPicker').classList.remove('show');
-      $('diagGoBtn').style.display = '';
+      _setEntryButtonsVisible(true);
+      _setEntryButtonsEnabled(true);
       setStatus('');
     };
   }
 
-  async function runDiagnose(asins, marketId){
+  async function runDiagnose(asins, marketId, profile){
+    const _isAds = profile === 'ads';
     // 真实节奏（来自后端日志实测，含并发限流场景）：
     //   单人独占：       数据 60-120s + Claude 推理 2-3min ≈ 3-5min
     //   2-3 人同店并发：  缓存命中后第二人秒返回数据，仍 3-5min
@@ -4946,14 +5010,16 @@ document.addEventListener('keydown', e => {
         sub = `本地预处理：成本/广告/搜索词分桶…（${elapsed}s）`;
       } else if (elapsed < 420){
         pct = 60 + ((elapsed - 210) / 210) * 30;  // 60 → 90
-        sub = `Claude AI 生成诊断报告中…（${elapsed}s，AI 推理通常 2-3 分钟）`;
+        sub = _isAds
+          ? `AI 生成广告方案中…（${elapsed}s，比完整诊断快，通常 1-2 分钟）`
+          : `AI 生成诊断报告中…（${elapsed}s，AI 推理通常 2-3 分钟）`;
       } else {
         pct = 90;
         sub = `仍在处理中（${elapsed}s）— 可能是积加接口高并发排队或 AI 仍在生成，请耐心等待`;
       }
       if (liveStage){
         sub = `${liveStage}…（${elapsed}s）`;
-        if (liveStage.indexOf('Claude') >= 0) pct = Math.max(pct, 60);
+        if (liveStage.indexOf('AI') >= 0 || liveStage.indexOf('Claude') >= 0) pct = Math.max(pct, 60);
       }
       setProgress(Math.min(pct, 90), sub);
       if (meta) meta.textContent = `已用 ${elapsed}s / 通常 3-8 分钟（积加限流 1秒/次，多人并发会更久）`;
@@ -4974,14 +5040,14 @@ document.addEventListener('keydown', e => {
     const competitorAsins = Array.from(document.querySelectorAll('#diagCompetitorGrid .diag-asin-input'))
       .map(i => i.value.trim().toUpperCase()).filter(Boolean).slice(0, 5);
     try {
-      const data = await apiPost('/api/diagnose', {
+      const data = await apiPost(_isAds ? '/api/ad_plan' : '/api/diagnose', {
         asins, marketId, days: diagDays, force_refresh: forceRefresh,
         include_variants: includeVariants,
         ...(seedKeywords.length ? { seed_keywords: seedKeywords } : {}),
         ...(competitorAsins.length ? { competitor_asins: competitorAsins } : {}),
       }, onDiagProgress);
       clearInterval(timer);
-      const _modeLabel = singleVariantOnly ? ' · 单变体模式' : '';
+      const _modeLabel = (_isAds ? ' · 仅广告方案' : '') + (singleVariantOnly ? ' · 单变体模式' : '');
       const _seedLabel = seedKeywords.length ? ` · 用关键词 ${seedKeywords.join('/')}` : '';
       const _daysLabel = diagDays !== 30 ? ` · ${diagDays} 天窗口` : '';
       setProgress(100, `完成（共用时 ${Math.floor((Date.now()-t0)/1000)}s${forceRefresh ? ' · 已绕过缓存' : ''}${_daysLabel}${_modeLabel}${_seedLabel}）`);
@@ -5756,7 +5822,9 @@ document.addEventListener('keydown', e => {
       ${_aiHint('Listing 诊断')}
       ${variantListingBtnsHtml}
       <div>
-        <div><strong>标题</strong> <span style="font-size:13px;color:${_scoreColor(ld.title_score)};font-weight:700">${ld.title_score ?? '—'}/10</span></div>
+        <div><strong>标题</strong> <span style="font-size:13px;color:${_scoreColor(ld.title_score)};font-weight:700">${ld.title_score ?? '—'}/10</span>
+          <span style="margin-left:8px">${_charBadge((lc.title||'').length, LISTING_LIMITS.title, '当前')}</span>
+        </div>
         ${ld.title_score_basis ? `<div style="font-size:11px;color:var(--sub);margin-top:3px;line-height:1.6">📊 ${esc(_stripScoreDeltas(ld.title_score_basis))}</div>` : ''}
         <div style="margin-top:6px"><code style="font-size:12px;color:var(--sub)">${esc(lc.title)}</code></div>
       </div>
@@ -7064,7 +7132,9 @@ document.addEventListener('keydown', e => {
           </details>
         </div>`;
       })() : ''}
-      ${!ai.stage && !ai.parse_error && !ai.ai_unavailable ? '<div style="color:var(--sub)">未配置 CLAUDE_API_KEY，返回的是调试数据</div>' : ''}`;
+      ${(!ai.stage && !ai.parse_error && !ai.ai_unavailable && resp.profile !== 'ads')
+        ? `<div style="color:var(--sub)">${esc(resp.note || 'AI 未返回结果，返回的是调试数据')}</div>`
+        : ''}`;
 
     // 副标题：广告诊断 / 盈亏分析 / Listing 诊断都基于 effective_days
     const w = data.window || {};
@@ -7114,17 +7184,28 @@ document.addEventListener('keydown', e => {
         </div>
       </div>` : '';
 
+    // 「只出广告方案」模式：listing/VOC/季节性/新品机会这几段没有采集数据，
+    // 渲染出来只是空壳。隐藏它们，但**其余 section 的编号一个都不改** ——
+    // 「四、广告诊断」必须还叫「四、广告诊断」，运营那台 RPA 机器人靠它定位。
+    const _isAdsProfile = !!(resp && resp.profile === 'ads');
+    const _adsNote = _isAdsProfile
+      ? `<div style="margin-bottom:14px;padding:10px 14px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35);border-radius:6px;font-size:12px;color:var(--sub)">
+          ⚡ <strong style="color:#fcd34d">只出广告方案</strong>模式：已跳过 Listing 文案评分、用户评论 VOC、季节性分析。
+          广告活动与否定词的结构与完整诊断一致。需要完整报告请点「开始诊断」。
+        </div>`
+      : '';
+
     $('diagReport').innerHTML =
-      _diBanner +
+      _diBanner + _adsNote +
       section('一、产品基础信息', baseHtml) +
       section('二、盈亏分析', costHtml, true, opSubtitle) +
-      section('三、Listing 诊断', listingHtml) +
+      (_isAdsProfile ? '' : section('三、Listing 诊断', listingHtml)) +
       section('四、广告诊断', adHtml, true, adSubtitle) +
       section('五、市场竞争分析 + 竞品赛道', compHtml, false) +
-      section('六、用户评论 / VOC' + ((!vocCompl.length && !vocPraise.length && !vocReviews.length && !hasIndVoc) ? '（数据源未采集，已折叠）' : (hasIndVoc && !vocCompl.length && !vocPraise.length ? '（仅行业 VOC，我方评论稀疏）' : '')), vocHtml, false) +
-      section('七、季节性分析', seasonHtml, false) +
+      (_isAdsProfile ? '' : section('六、用户评论 / VOC' + ((!vocCompl.length && !vocPraise.length && !vocReviews.length && !hasIndVoc) ? '（数据源未采集，已折叠）' : (hasIndVoc && !vocCompl.length && !vocPraise.length ? '（仅行业 VOC，我方评论稀疏）' : '')), vocHtml, false)) +
+      (_isAdsProfile ? '' : section('七、季节性分析', seasonHtml, false)) +
       section('八、AI 综合诊断', aiHtml) +
-      section('九、新品机会', renderNewOpportunities(data), true, '从类目 Top100 挖潜在选品 · 点卡片按钮可在新标签页跑竞品分析');
+      (_isAdsProfile ? '' : section('九、新品机会', renderNewOpportunities(data), true, '从类目 Top100 挖潜在选品 · 点卡片按钮可在新标签页跑竞品分析'));
     $('diagReport').classList.add('show');
     // 缓存最近一次报告，供「重新解析」/「下载」复用（不重新调 Claude）
     _lastReport = { ai, data, asins: getAsins(), market: market, generated_at: new Date().toISOString() };
@@ -7385,6 +7466,7 @@ document.addEventListener('keydown', e => {
           ${r.title_score != null ? `
             <div style="margin-top:6px"><strong>标题</strong>
               <span style="font-size:13px;color:${_scoreColor(r.title_score)};font-weight:700;margin-left:4px">${r.title_score}/10</span>
+              <span style="margin-left:8px">${_charBadge((target.title||'').length, LISTING_LIMITS.title, '当前')}</span>
             </div>
             ${r.title_basis ? `<div style="font-size:11px;color:var(--sub);margin-top:3px;line-height:1.6">📊 ${esc(_stripScoreDeltas(r.title_basis))}</div>` : ''}
             <div style="margin-top:6px"><code style="font-size:12px;color:var(--sub)">${esc(target.title || '')}</code></div>
@@ -7616,16 +7698,40 @@ document.addEventListener('keydown', e => {
       </table>
     </div>`;
   }
+  // 2026-07-27 亚马逊新规字数上限（Media 类目除外）。
+  // 后端同一份口径在 app/listing/validate.py，改新规时两处都要动。
+  const LISTING_LIMITS = { title: 75, item_highlights: 125, bullet: 255 };
+
+  function _charBadge(len, max, label){
+    if (!len) return '';
+    const over = len > max;
+    const color = over ? '#f87171' : (len > max * 0.9 ? '#fcd34d' : '#6ee7b7');
+    const tip = over ? `超出 ${len - max} 字符，亚马逊会自动截断或改写` : '符合新规';
+    return `<span style="font-size:11px;color:${color};font-weight:600" title="${esc(tip)}">`
+      + `${over ? '⚠️ ' : ''}${label} ${len}/${max} 字符${over ? `（超 ${len - max}）` : ''}</span>`;
+  }
+
   function _renderTitleSuggestion(s){
     if (!s) return '';
     if (typeof s === 'string') {
       return `<div style="margin-top:6px;padding:8px;background:var(--surface2);border-radius:6px;font-size:12px">💡 ${esc(s)}</div>`;
     }
     if (typeof s !== 'object') return '';
+    // 2026-07-27 新规：标题 ≤75、商品亮点 ≤125。以实际字符数为准（AI 自报的
+    // new_title_char_count 只当兜底——模型数字符不可靠，能自己数就别信它）
+    const nt = s.new_title || '';
+    const ntLen = nt ? nt.length : (s.new_title_char_count || 0);
+    const ih = s.item_highlights_suggestion || '';
     return `<div style="margin-top:8px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px">
       <div style="font-size:12px;font-weight:700;color:#6ee7b7;margin-bottom:6px">💡 建议改写</div>
-      ${s.new_title ? `<div style="font-size:12px;font-family:'JetBrains Mono',monospace;padding:6px 8px;background:var(--surface);border-radius:4px;margin-bottom:6px">${esc(s.new_title)}</div>` : ''}
-      ${s.rationale ? `<div style="font-size:12px;color:var(--sub);line-height:1.6">🎯 改写思路：${esc(s.rationale)}</div>` : ''}
+      ${nt ? `<div style="font-size:12px;font-family:'JetBrains Mono',monospace;padding:6px 8px;background:var(--surface);border-radius:4px;margin-bottom:6px">${esc(nt)}</div>
+        <div style="margin-bottom:6px">${_charBadge(ntLen, LISTING_LIMITS.title, '标题')}</div>` : ''}
+      ${ih ? `<div style="margin-top:8px;padding:8px 10px;background:var(--surface);border-left:3px solid #a5b4fc;border-radius:4px">
+        <div style="font-size:11px;font-weight:700;color:#a5b4fc;margin-bottom:4px">✨ 商品亮点 Item Highlights<span style="font-weight:400;color:var(--sub);margin-left:6px">2026 新规字段，承接标题装不下的规格细节</span></div>
+        <div style="font-size:12px;font-family:'JetBrains Mono',monospace;line-height:1.6">${esc(ih)}</div>
+        <div style="margin-top:4px">${_charBadge(ih.length, LISTING_LIMITS.item_highlights, '亮点')}</div>
+      </div>` : ''}
+      ${s.rationale ? `<div style="font-size:12px;color:var(--sub);line-height:1.6;margin-top:6px">🎯 改写思路：${esc(s.rationale)}</div>` : ''}
       ${_renderAddedWords(s.added_words)}
       ${_renderRemovedWords(s.removed_or_demoted_words)}
     </div>`;
@@ -7655,6 +7761,12 @@ document.addEventListener('keydown', e => {
 
   // ===== Markdown 导出 =====
   function _md(s){ return String(s == null ? '' : s); }
+  function _mdCharNote(len, max, label){
+    if (!len) return '';
+    return len > max
+      ? `⚠️ ${label} ${len}/${max} 字符，**超出 ${len - max} 字符**（亚马逊会自动截断或改写）`
+      : `✅ ${label} ${len}/${max} 字符，符合 2026 新规`;
+  }
   function _toMarkdown(rep){
     const ai = rep.ai || {};
     const data = rep.data || {};
@@ -7767,6 +7879,7 @@ document.addEventListener('keydown', e => {
     if (ld.title_score_basis) lines.push(`📊 评分依据：${_md(_stripScoreDeltas(ld.title_score_basis))}`);
     lines.push('');
     lines.push(`\`${_md(lc.title)}\``);
+    lines.push(`${_mdCharNote((lc.title||'').length, LISTING_LIMITS.title, '当前标题')}`);
     if ((ld.title_issues||[]).length){
       lines.push('');
       lines.push(`**问题与依据**`);
@@ -7779,7 +7892,16 @@ document.addEventListener('keydown', e => {
         lines.push(`> ${_md(ld.title_suggestion)}`);
       } else {
         const s = ld.title_suggestion;
-        if (s.new_title) { lines.push(`> ${_md(s.new_title)}`); }
+        if (s.new_title) {
+          lines.push(`> ${_md(s.new_title)}`);
+          lines.push(`> ${_mdCharNote(s.new_title.length, LISTING_LIMITS.title, '新标题')}`);
+        }
+        if (s.item_highlights_suggestion) {
+          lines.push('');
+          lines.push(`**✨ 商品亮点 Item Highlights**（2026 新规字段）`);
+          lines.push(`> ${_md(s.item_highlights_suggestion)}`);
+          lines.push(`> ${_mdCharNote(s.item_highlights_suggestion.length, LISTING_LIMITS.item_highlights, '亮点')}`);
+        }
         if (s.rationale) { lines.push(''); lines.push(`🎯 改写思路：${_md(s.rationale)}`); }
         if ((s.added_words||[]).length){
           lines.push('');
