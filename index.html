@@ -2073,16 +2073,28 @@ function _bpEndpoint(path) {
 // 读心跳流响应：{"__progress":...} 行喂 onProgress，返回最终 payload 文本。
 // 协议同 apiPost（app/routers/_stream.py）：进度行独立成行、payload 是最后一段无换行内容
 async function _bpReadHeartbeat(response, onProgress) {
-  if (!response.body || !response.body.getReader) return response.text();
+  const emptyStreamError = (sawProgress) => {
+    const e = new Error(sawProgress
+      ? '服务连接已中断：已收到处理进度，但没有收到最终结果。可能是线上服务重启或网关截断了长连接；为避免重复调用，系统不会自动重试。'
+      : '服务返回了空响应。可能是线上服务重启或网关中断；为避免重复调用，系统不会自动重试。');
+    e.code = 'EMPTY_STREAM_RESPONSE';
+    return e;
+  };
+  if (!response.body || !response.body.getReader) {
+    const text = await response.text();
+    if (!text.trim()) throw emptyStreamError(false);
+    return text;
+  }
   const reader = response.body.getReader();
   const dec = new TextDecoder();
-  let buf = '', linePayload = '';
+  let buf = '', linePayload = '', sawProgress = false;
   const eat = (line) => {
     line = line.trim();
     if (!line) return;   // 心跳空格
     try {
       const o = JSON.parse(line);
       if (o && o.__progress !== undefined) {
+        sawProgress = true;
         if (onProgress) { try { onProgress(String(o.__progress)); } catch(_){} }
         return;
       }
@@ -2097,7 +2109,9 @@ async function _bpReadHeartbeat(response, onProgress) {
     while ((nl = buf.indexOf('\n')) >= 0) { eat(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
   }
   buf += dec.decode();
-  return buf.trim() || linePayload;
+  const payload = buf.trim() || linePayload;
+  if (!payload) throw emptyStreamError(sawProgress);
+  return payload;
 }
 const ANALYSIS_WEBHOOK = () => _bpEndpoint('/api/analysis/competitor');
 const REPORT_WEBHOOK   = () => _bpEndpoint('/api/analysis/report');
@@ -4793,7 +4807,20 @@ document.addEventListener('keydown', e => {
     // 心跳流式响应：进度行喂 onProgress、尾段是最终 JSON——
     // 传输层读取统一复用 _bpReadHeartbeat（协议唯一实现，勿再内嵌手写读取器）
     const text = await _bpReadHeartbeat(res, onProgress);
-    const data = text ? JSON.parse(text) : undefined;
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (parseError) {
+      const e = new Error('诊断服务返回了不完整或非法的 JSON，长连接可能被网关中途截断；为避免重复调用，系统不会自动重试。');
+      e.code = 'INVALID_STREAM_PAYLOAD';
+      e.cause = parseError;
+      throw e;
+    }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      const e = new Error('诊断服务没有返回有效的结果对象；为避免重复调用，系统不会自动重试。');
+      e.code = 'INVALID_DIAG_RESPONSE';
+      throw e;
+    }
     // 流一旦开始就无法改 HTTP status，运行期错误统一在 body 里以 {error:true,...} 返回
     if (data && data.error === true) {
       const e = new Error(data.detail || '诊断失败');
@@ -5319,6 +5346,9 @@ document.addEventListener('keydown', e => {
   window.__diagRender = renderReport;
 
   function renderReport(resp){
+    if (!resp || typeof resp !== 'object' || Array.isArray(resp)) {
+      throw new Error('诊断结果为空或格式异常，无法生成报告。请先检查线上服务日志；为避免重复调用，系统不会自动重试。');
+    }
     const ai = resp.ai || {};
     const data = resp.data || {};
     const sel = (data.selling || [])[0] || {};
