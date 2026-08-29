@@ -5173,8 +5173,33 @@ document.addEventListener('keydown', e => {
       if (s.variationAsin) ourSet.add(String(s.variationAsin).toUpperCase());
     });
 
+    // Sorftime 2026-08-25 起把 category_report 改成了 snake_case JSON。后端只在
+    // calculator 的聚合函数里补中文别名，前端拿到的 data.competitors 仍是原始 payload，
+    // 所以这里自己补一次；旧版纯中文返回照样兼容（有中文键就不覆盖）。
+    const _ROW_ALIAS = {
+      asin:'产品ASIN码', title:'标题', brand:'品牌', price:'价格',
+      monthly_sales_volume:'月销量', monthly_sales_amount:'月销额',
+      review_count:'评论数', star_rating:'星级', gross_profit_margin:'毛利率',
+      online_date:'上架日期', category_rank:'所处类目排名', seller:'卖家',
+      product_category:'所属细分类目',
+    };
+    rows = rows.map(r => {
+      const out = Object.assign({}, r);
+      for (const k in _ROW_ALIAS) {
+        const cn = _ROW_ALIAS[k];
+        if (out[k] != null && out[k] !== '' && !out[cn]) out[cn] = out[k];
+      }
+      return out;
+    });
+
     const _asin = r => String(r['产品ASIN码'] || r['ASIN'] || r['asin'] || '').toUpperCase();
-    const _num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+    // Sorftime 数值字段形态很杂："387" / 28.04 / "1,200" / "£28.04" / "31.5%"，
+    // 裸 parseFloat 会把 "1,200" 读成 1、把 "£28.04" 读成 NaN → 先剥掉非数字字符
+    const _num = v => {
+      if (typeof v === 'number') return isFinite(v) ? v : 0;
+      const n = parseFloat(String(v == null ? '' : v).replace(/[^\d.\-]/g, ''));
+      return isNaN(n) ? 0 : n;
+    };
     const today = new Date();
     const _daysSince = s => {
       if (!s) return null;
@@ -5307,7 +5332,12 @@ document.addEventListener('keydown', e => {
       const launch = String(r['上架日期'] || '');
       const age    = _daysSince(launch);
       // "类目：Bordature da giardino，排名:1" → "Bordature da giardino · 排名:1"
-      const rank   = String(r['所处类目排名'] || '—').replace(/^类目[：:]\s*/, '').replace(/，/g, ' · ');
+      // 新版是英文形态 "Category: Tampers, Rank: 1"，一并归一化
+      // 只在「排名/Rank」前面断开，不能无脑替换逗号——否则 "Rank: 1,240" 会被拆成 "1 · 240"。
+      // 注意不能用 \b 收尾：JS 的 \b 只认 ASCII，"排名" 后面永远不成边界，中文形态会漏匹配。
+      const rank   = String(r['所处类目排名'] || '—')
+        .replace(/^(类目|Category)\s*[：:]\s*/i, '')
+        .replace(/[，,]\s*(?=(?:排名|Rank)\s*[：:])/gi, ' · ');
       const seller = String(r['卖家'] || '—');
       const amzUrl   = `https://www.${amzHost}/dp/${asin}`;
       const drillUrl = `${location.pathname}?asin=${encodeURIComponent(asin)}&site=${encodeURIComponent(siteCode)}&autorun=1`;
@@ -5644,7 +5674,7 @@ document.addEventListener('keydown', e => {
           // const onTheWay = (+iv.inbound_qty || 0) + (+iv.procurement_qty || 0);
           // const dosWithAll = iv.dos_with_all_intransit;
           // const covered = iv.in_transit_covers_lead === true;
-          const riskMap = {'紧急':'#fca5a5','高':'#fcd34d','高（在途覆盖中）':'#fcd34d','中':'var(--text)','中（在途覆盖中）':'var(--text)','正常':'#6ee7b7','过剩':'#fcd34d','滞销':'#f87171','滞销-高危':'#dc2626','无销量':'var(--sub)','无销量无库存':'var(--sub)'};
+          const riskMap = {'紧急':'#fca5a5','高':'#fcd34d','高（在途覆盖中）':'#fcd34d','中':'var(--text)','中（在途覆盖中）':'var(--text)','正常':'#6ee7b7','过剩':'#fcd34d','滞销':'#f87171','滞销-高危':'#dc2626','无销量':'var(--sub)','无销量无库存':'var(--sub)','库存数据缺失':'#fbbf24'};
           const role = vd.role || '—';
           // ACOS 三级 fallback：cost_analysis.ads_summary（sp_products 聚合，最准）
           //   → listing_stats.acoS（积加聚合，有时为 0）→ AI variant_diagnosis.performance.acos → 未回填
