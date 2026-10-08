@@ -1333,6 +1333,13 @@ if (localStorage.getItem(BP_LS.auth) === '1') document.documentElement.classList
         <button onclick="window.__testDiagBase()" style="padding:6px 12px;font-size:12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer">测试</button>
         <span id="diagApiBaseStatus" style="color:var(--sub)"></span>
       </div>
+      <details style="margin-bottom:12px;font-size:12px;color:var(--sub)">
+        <summary style="cursor:pointer">排查连接问题</summary>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button id="diagStreamProbeBtn" onclick="window.__testDiagStream()" style="padding:6px 12px;font-size:12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer">长连接测试（150秒）</button>
+          <span id="diagStreamProbeStatus" role="status" style="overflow-wrap:anywhere">测试持续 150 秒，不生成报告，也不调用模型。</span>
+        </div>
+      </details>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <label style="font-size:12px;color:var(--text);font-weight:600">
           <span style="color:#ef4444;margin-right:3px">*</span>ASIN（必填，1-4 个同父体）
@@ -2072,16 +2079,40 @@ function _bpEndpoint(path) {
 }
 // 读心跳流响应：{"__progress":...} 行喂 onProgress，返回最终 payload 文本。
 // 协议同 apiPost（app/routers/_stream.py）：进度行独立成行、payload 是最后一段无换行内容
-async function _bpReadHeartbeat(response, onProgress) {
+async function _bpReadHeartbeat(response, onProgress, onReceive) {
+  const started = Date.now();
+  const streamId = response.headers && response.headers.get('X-Stream-ID') || '';
+  let receivedBytes = 0, chunks = 0, lastReceived = started;
+  const stats = () => ({
+    streamId, receivedBytes, chunks,
+    elapsedSeconds: Math.floor((Date.now() - started) / 1000),
+    idleSeconds: Math.floor((Date.now() - lastReceived) / 1000)
+  });
+  const connectionError = (cause) => {
+    if (cause && cause.name === 'AbortError') return cause;
+    const d = stats();
+    const e = new Error('服务连接在结果返回前中断（读取 ' + d.elapsedSeconds + ' 秒，收到 '
+      + d.receivedBytes + ' 字节，最后收包距今 ' + d.idleSeconds + ' 秒'
+      + (streamId ? '，请求编号 ' + streamId : '')
+      + '）。请用长连接测试核对网关或网络，并按编号查看服务器日志；系统不会自动重试。');
+    e.code = 'STREAM_CONNECTION_LOST';
+    e.cause = cause;
+    e.streamDiagnostics = d;
+    console.warn('[stream] connection lost', d);
+    return e;
+  };
   const emptyStreamError = (sawProgress) => {
     const e = new Error(sawProgress
       ? '服务连接已中断：已收到处理进度，但没有收到最终结果。可能是线上服务重启或网关截断了长连接；为避免重复调用，系统不会自动重试。'
       : '服务返回了空响应。可能是线上服务重启或网关中断；为避免重复调用，系统不会自动重试。');
     e.code = 'EMPTY_STREAM_RESPONSE';
+    e.streamDiagnostics = stats();
+    if (streamId) e.message += ' 请求编号：' + streamId;
     return e;
   };
   if (!response.body || !response.body.getReader) {
-    const text = await response.text();
+    let text;
+    try { text = await response.text(); } catch (cause) { throw connectionError(cause); }
     if (!text.trim()) throw emptyStreamError(false);
     return text;
   }
@@ -2090,7 +2121,7 @@ async function _bpReadHeartbeat(response, onProgress) {
   let buf = '', linePayload = '', sawProgress = false;
   const eat = (line) => {
     line = line.trim();
-    if (!line) return;   // 心跳空格
+    if (!line) return;
     try {
       const o = JSON.parse(line);
       if (o && o.__progress !== undefined) {
@@ -2099,18 +2130,29 @@ async function _bpReadHeartbeat(response, onProgress) {
         return;
       }
     } catch(_) {}
-    linePayload = line;  // 理论上 payload 无换行走不到这，兜底
+    linePayload = line;
   };
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let nl;
-    while ((nl = buf.indexOf('\n')) >= 0) { eat(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      receivedBytes += value.byteLength;
+      chunks++;
+      lastReceived = Date.now();
+      if (onReceive) { try { onReceive(stats()); } catch(_){} }
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) { eat(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
+    }
+  } catch (cause) {
+    throw connectionError(cause);
+  } finally {
+    reader.releaseLock();
   }
   buf += dec.decode();
   const payload = buf.trim() || linePayload;
   if (!payload) throw emptyStreamError(sawProgress);
+  console.info('[stream] received final payload', stats());
   return payload;
 }
 const ANALYSIS_WEBHOOK = () => _bpEndpoint('/api/analysis/competitor');
@@ -4838,6 +4880,35 @@ document.addEventListener('keydown', e => {
     DIAG_API_BASE = v;
     window.DIAG_API_BASE = v;   // 同步到 window，生图模块的 _imageEndpoint 能立即用上新地址
     $('diagApiBaseStatus').innerHTML = '<span style="color:#3fb950">✓ 已保存</span>';
+  };
+  // 独立验证浏览器到后端的心跳链路，不生成诊断、不调用模型。
+  window.__testDiagStream = async function(){
+    const v = ($('diagApiBaseInput').value.trim() || DIAG_API_BASE || '').replace(/\/$/, '');
+    if (!v){ $('diagStreamProbeStatus').textContent = '⚠ 请先填地址'; return; }
+    const btn = $('diagStreamProbeBtn');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 170000);
+    $('diagStreamProbeStatus').textContent = '长连接测试中（150 秒，不调用模型）…';
+    try {
+      const r = await fetch(v + '/api/stream_probe?seconds=150', { signal: ctrl.signal });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const text = await _bpReadHeartbeat(r, null, d => {
+        $('diagStreamProbeStatus').textContent = '测试中：已读取 ' + d.elapsedSeconds + ' 秒，收到 '
+          + d.chunks + ' 个数据块 / ' + d.receivedBytes + ' 字节'
+          + (d.streamId ? '，编号 ' + d.streamId : '');
+      });
+      const data = JSON.parse(text);
+      if (data.error === true) throw new Error(data.detail || '测试失败');
+      if (data.ok !== true || data.seconds !== 150) throw new Error('测试没有返回有效结果');
+      $('diagStreamProbeStatus').textContent = '✓ 150 秒长连接测试通过（不代表所有更长请求均通过）';
+    } catch(e){
+      $('diagStreamProbeStatus').textContent = '✗ ' + (e.name === 'AbortError' ? '长连接测试超过 170 秒，已停止' : e.message);
+    } finally {
+      clearTimeout(timer);
+      btn.disabled = false;
+    }
   };
   window.__testDiagBase = async function(){
     const v = ($('diagApiBaseInput').value.trim() || DIAG_API_BASE || '').replace(/\/$/, '');
